@@ -190,6 +190,8 @@ function calculateCRI(
     percentile: (number | null)[]; 
   };
   criState: ('panic' | 'complacent' | 'normal' | null)[];
+  volumeState: ('extreme-shrink' | 'shrink' | 'normal' | 'expand' | 'extreme-expand' | null)[];
+  vr: (number | null)[];
 } {
   const n = stockData.length;
   const cri: (number | null)[] = new Array(n).fill(null);
@@ -198,13 +200,23 @@ function calculateCRI(
   const curveScores: (number | null)[] = new Array(n).fill(null);
   const percentileScores: (number | null)[] = new Array(n).fill(null);
   const criState: ('panic' | 'complacent' | 'normal' | null)[] = new Array(n).fill(null);
+  const volumeState: ('extreme-shrink' | 'shrink' | 'normal' | 'expand' | 'extreme-expand' | null)[] = new Array(n).fill(null);
+  const vr: (number | null)[] = new Array(n).fill(null);
   
-  if (n < 60) return { cri, criPercentile: new Array(n).fill(null), components: { basis: basisScores, jump: jumpScores, curve: curveScores, percentile: percentileScores }, criState };
+  if (n < 60) return { 
+    cri, 
+    criPercentile: new Array(n).fill(null), 
+    components: { basis: basisScores, jump: jumpScores, curve: curveScores, percentile: percentileScores }, 
+    criState,
+    volumeState,
+    vr
+  };
   
   const opens = stockData.map(d => d.open);
   const highs = stockData.map(d => d.high);
   const lows = stockData.map(d => d.low);
   const closes = stockData.map(d => d.close);
+  const volumes = stockData.map(d => d.volume);
   
   // 计算不同周期的YZ Vol
   const yzVol5 = calculateYZVol(opens, highs, lows, closes, 5);   // 短期
@@ -246,6 +258,16 @@ function calculateCRI(
       sum += closes[j];
     }
     ma20[i] = sum / 20;
+  }
+  
+  // 计算20日均量用于成交量状态判断
+  const volMA20: (number | null)[] = new Array(n).fill(null);
+  for (let i = 19; i < n; i++) {
+    let sum = 0;
+    for (let j = i - 19; j <= i; j++) {
+      sum += volumes[j];
+    }
+    volMA20[i] = sum / 20;
   }
   
   // 从第60天开始计算CRI
@@ -370,6 +392,27 @@ function calculateCRI(
     ) + trendAdjustedPct * 0.1;
     
     cri[i] = Math.min(Math.max(criRaw, 0), 100);
+    
+    // 计算成交量状态 VR = VOL / MA(VOL, 20)
+    const currentVolume = volumes[i];
+    const currentVolMA20 = volMA20[i];
+    if (currentVolMA20 !== null && currentVolMA20 > 0) {
+      const currentVR = currentVolume / currentVolMA20;
+      vr[i] = currentVR;
+      
+      // 判断成交量状态
+      if (currentVR < 0.5) {
+        volumeState[i] = 'extreme-shrink'; // 极度缩量
+      } else if (currentVR < 0.8) {
+        volumeState[i] = 'shrink'; // 缩量
+      } else if (currentVR <= 1.2) {
+        volumeState[i] = 'normal'; // 正常
+      } else if (currentVR <= 2.0) {
+        volumeState[i] = 'expand'; // 放量
+      } else {
+        volumeState[i] = 'extreme-expand'; // 极度放量
+      }
+    }
   }
   
   // 6. 计算CRI的历史分位数（120日滚动）
@@ -434,6 +477,8 @@ function calculateCRI(
       percentile: percentileScores,
     },
     criState,
+    volumeState,
+    vr,
   };
 }
 
@@ -809,6 +854,9 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
       curve: criResult.components.curve[i]!,
       percentile: criResult.components.percentile[i]!,
     } : null,
+    // 成交量状态
+    volumeState: criResult.volumeState[i],
+    vr: criResult.vr[i],
     // 贪婪指标
     greedy: greedyResult.greedy[i],
     greedyComponents: greedyResult.components.posBasis[i] !== null ? {

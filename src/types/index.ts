@@ -27,6 +27,9 @@ export interface IndicatorData {
     percentile: number;   // 波动率历史百分位
   } | null;
   criState: 'panic' | 'complacent' | 'normal' | null; // CRI状态标记
+  // 成交量状态
+  volumeState: 'extreme-shrink' | 'shrink' | 'normal' | 'expand' | 'extreme-expand' | null;
+  vr: number | null; // 成交量比率 VR = VOL / MA(VOL,20)
   // 贪婪情绪指标 (Greed Sentiment Indicator)
   greedy: number | null;       // 贪婪总分 (0-100)
   greedyComponents: {          // 贪婪成分分解

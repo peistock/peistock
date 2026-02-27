@@ -127,7 +127,7 @@ function App() {
                   使用说明
                 </button>
               </HelpDialog>
-              <HelpDialog defaultTab="formula">
+              <HelpDialog defaultTab="guide">
                 <button className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors">
                   <Code2 className="w-4 h-4" />
                   公式参考
@@ -344,15 +344,37 @@ function App() {
                                   lastIndicator.criState === 'complacent' ? 'text-[#03B172]' : 
                                   (lastIndicator.criPercentile !== null && lastIndicator.criPercentile >= 80) ? 'text-[#E3B341]' : 'text-[#8B949E]'
                                 }`}>
-                                  {lastIndicator.criState === 'panic' ? '恐慌状态' : 
-                                   lastIndicator.criState === 'complacent' ? '自满状态' : 
-                                   (lastIndicator.criPercentile !== null && lastIndicator.criPercentile >= 80) ? 
-                                     `历史高位 (${lastIndicator.criPercentile.toFixed(0)}%分位)` : 
-                                   (lastIndicator.criPercentile !== null && lastIndicator.criPercentile >= 60) ? 
-                                     `偏高 (${lastIndicator.criPercentile.toFixed(0)}%分位)` : 
-                                   (lastIndicator.criPercentile !== null && lastIndicator.criPercentile <= 20) ? 
-                                     `历史低位 (${lastIndicator.criPercentile.toFixed(0)}%分位)` : 
-                                     '正常区间'}
+                                  {/* 三条件综合评价：CRI分位数 + 价格位置 + 成交量状态 */}
+                                  {(() => {
+                                    const criPct = lastIndicator.criPercentile;
+                                    const isBelowMAHS = lastIndicator.close < (lastIndicator.mahs || Infinity);
+                                    const volState = lastIndicator.volumeState;
+                                    
+                                    // 成交量状态描述
+                                    const volDesc = volState === 'extreme-shrink' ? '极度缩量' :
+                                                   volState === 'shrink' ? '缩量' :
+                                                   volState === 'expand' ? '放量' :
+                                                   volState === 'extreme-expand' ? '极度放量' : '正常量';
+                                    
+                                    // 三条件组合判断
+                                    if (criPct !== null && criPct >= 80 && isBelowMAHS) {
+                                      // 恐慌状态 + 成交量修饰
+                                      if (volState === 'extreme-shrink') return `恐慌·洗盘? (${volDesc})`;
+                                      if (volState === 'expand' || volState === 'extreme-expand') return `恐慌·放量 (${volDesc})`;
+                                      return `恐慌状态 (${volDesc})`;
+                                    } else if (criPct !== null && criPct >= 60 && isBelowMAHS) {
+                                      return `偏高·下跌 (${volDesc})`;
+                                    } else if (criPct !== null && criPct <= 20 && !isBelowMAHS) {
+                                      // 自满状态 + 成交量修饰
+                                      if (volState === 'extreme-expand') return `自满·出货? (${volDesc})`;
+                                      return `自满状态 (${volDesc})`;
+                                    } else {
+                                      return criPct !== null ? 
+                                        (criPct >= 60 ? `偏高 (${criPct.toFixed(0)}%分位·${volDesc})` : 
+                                         criPct <= 20 ? `低位 (${criPct.toFixed(0)}%分位·${volDesc})` : 
+                                         `正常 (${criPct.toFixed(0)}%分位·${volDesc})`) : '正常区间';
+                                    }
+                                  })()}
                                 </span>
                               )}
                             </div>
@@ -365,7 +387,11 @@ function App() {
                               {lastIndicator?.cri?.toFixed(1) || '-'}
                             </div>
                             <div className="text-xs text-[#8B949E] mt-1">
-                              成本偏离·跳跃风险·波动曲线·历史百分位
+                              VR: {lastIndicator?.vr?.toFixed(2) || '-'}x · 
+                              {lastIndicator?.volumeState === 'extreme-shrink' ? '极度缩量' :
+                               lastIndicator?.volumeState === 'shrink' ? '缩量' :
+                               lastIndicator?.volumeState === 'expand' ? '放量' :
+                               lastIndicator?.volumeState === 'extreme-expand' ? '极度放量' : '正常量'}
                             </div>
                             
                             {/* CRI 成分详情 */}
