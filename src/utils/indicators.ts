@@ -415,34 +415,37 @@ function calculateCRI(
     }
   }
   
-  // 6. 计算CRI的历史分位数（120日滚动）
-  // 使用分位数来设定动态阈值，适应不同个股的波动特性
+  // 6. 计算CRI的历史分位数（使用全部可用历史数据）
   const criPercentile: (number | null)[] = new Array(n).fill(null);
-  const lookbackPeriod = 120; // 120日历史回看
+  const firstValidCRI = cri.findIndex(v => v !== null);
   
-  for (let i = lookbackPeriod; i < n; i++) {
-    const currentCRI = cri[i];
-    if (currentCRI === null) continue;
-    
-    // 获取历史CRI值（不包含当前值）
-    const histCRI: number[] = [];
-    for (let j = i - lookbackPeriod; j < i; j++) {
-      if (cri[j] !== null) histCRI.push(cri[j]!);
-    }
-    
-    if (histCRI.length >= 60) { // 至少需要60个有效值
-      const sorted = [...histCRI].sort((a, b) => a - b);
-      const rank = sorted.findIndex(v => v >= currentCRI);
-      criPercentile[i] = rank >= 0 ? (rank / sorted.length) * 100 : 100;
-    } else {
-      criPercentile[i] = 50; // 数据不足时默认为中位数
+  if (firstValidCRI >= 0) {
+    for (let i = firstValidCRI + 60; i < n; i++) { // 至少60个历史数据点
+      const currentCRI = cri[i];
+      if (currentCRI === null) continue;
+      
+      // 获取从开始到当前的所有历史CRI值（不包含当前值）
+      const histCRI: number[] = [];
+      for (let j = firstValidCRI; j < i; j++) {
+        if (cri[j] !== null) histCRI.push(cri[j]!);
+      }
+      
+      if (histCRI.length >= 60) {
+        const sorted = [...histCRI].sort((a, b) => a - b);
+        const lessThan = sorted.filter(v => v < currentCRI).length;
+        const equalTo = sorted.filter(v => v === currentCRI).length;
+        const rank = lessThan + equalTo / 2;
+        criPercentile[i] = (rank / histCRI.length) * 100;
+      } else {
+        criPercentile[i] = 50; // 数据不足时默认为中位数
+      }
     }
   }
   
   // 7. 判断CRI状态 - 基于历史分位数
   // 高分位数(>80%) + 价格低于成本 = 极端恐慌（对该股而言）
   // 低分位数(<20%) + 价格高于成本 = 极端自满
-  for (let i = lookbackPeriod; i < n; i++) {
+  for (let i = firstValidCRI + 60; i < n; i++) {
     const currentCRI = cri[i];
     const currentPct = criPercentile[i];
     const mahsValue = mahs[i];
@@ -777,6 +780,226 @@ export function calculateBIAS(closes: number[], ma: (number | null)[]): (number 
 }
 
 /**
+ * 计算均线未来斜率（假设未来价格不变）
+ * @param closes 收盘价序列
+ * @param maPeriod 均线周期
+ * @param futureDays 未来天数（默认5日）
+ * @returns 斜率序列（百分比变化率）
+ */
+function calculateMASlope(
+  closes: number[], 
+  maPeriod: number, 
+  futureDays: number = 5
+): (number | null)[] {
+  const n = closes.length;
+  const slopes: (number | null)[] = new Array(n).fill(null);
+  
+  // 需要先计算均线
+  const ma = calculateSMA(closes, maPeriod);
+  
+  // 需要足够的数据：当前索引 >= maPeriod + futureDays - 1
+  const startIndex = maPeriod + futureDays - 1;
+  
+  for (let i = startIndex; i < n; i++) {
+    const currentMA = ma[i];
+    if (currentMA === null || currentMA === 0) continue;
+    
+    const currentClose = closes[i];
+    
+    // 计算未来第futureDays日的预期均线值
+    // MA_future = (MA_now * N - sum(被剔除的价格) + futureDays * close_now) / N
+    let sumToRemove = 0;
+    for (let j = 0; j < futureDays; j++) {
+      // 被剔除的是 i - (N-1) - j 位置的价格，即最老的N个价格中的前futureDays个
+      const removeIndex = i - (maPeriod - 1) - j;
+      if (removeIndex >= 0) {
+        sumToRemove += closes[removeIndex];
+      }
+    }
+    
+    const futureMA = (currentMA * maPeriod - sumToRemove + futureDays * currentClose) / maPeriod;
+    
+    // 计算斜率：每日平均变化百分比
+    const totalChange = futureMA - currentMA;
+    const dailyChangePct = (totalChange / futureDays) / currentMA * 100;
+    
+    slopes[i] = dailyChangePct;
+  }
+  
+  return slopes;
+}
+
+/**
+ * 计算斜率历史分位数（基于负斜率的历史分布）
+ * @param slopes 斜率序列
+ * @param lookback 回看周期（默认120日）
+ * @returns 分位数值（0-100）
+ */
+function calculateSlopePercentile(
+  slopes: (number | null)[], 
+  lookback: number = 120
+): (number | null)[] {
+  const n = slopes.length;
+  const percentiles: (number | null)[] = new Array(n).fill(null);
+  
+  for (let i = lookback; i < n; i++) {
+    const currentSlope = slopes[i];
+    if (currentSlope === null) continue;
+    
+    // 收集回看周期内的斜率历史（只取负斜率，因为只关心下压）
+    const historicalSlopes: number[] = [];
+    for (let j = i - lookback; j < i; j++) {
+      const s = slopes[j];
+      if (s !== null && s < 0) {
+        historicalSlopes.push(Math.abs(s)); // 取绝对值便于比较
+      }
+    }
+    
+    if (historicalSlopes.length < 10) continue; // 需要足够的历史数据
+    
+    historicalSlopes.sort((a, b) => a - b);
+    
+    // 判断是否为下压趋势（斜率<=0.05%视为下压，考虑微小误差）
+    if (currentSlope <= 0.05) {
+      // 当前为下压趋势，计算在历史负斜率中的分位数
+      const absCurrent = Math.abs(currentSlope);
+      let rank = 0;
+      for (const s of historicalSlopes) {
+        if (absCurrent >= s) rank++;
+      }
+      percentiles[i] = (rank / historicalSlopes.length) * 100;
+    } else {
+      // 当前为明显上升趋势，压力分为0
+      percentiles[i] = 0;
+    }
+  }
+  
+  return percentiles;
+}
+
+/**
+ * 计算综合斜率压力得分
+ * @param slope20 MA20斜率分位数
+ * @param slope60 MA60斜率分位数  
+ * @param slope225 MA225斜率分位数
+ * @returns 综合压力得分（0-100）和压力等级（0-3）
+ */
+function calculateSlopePressure(
+  slope20: (number | null)[],
+  slope60: (number | null)[],
+  slope225: (number | null)[]
+): { pressure: (number | null)[]; level: (0 | 1 | 2 | 3 | null)[] } {
+  const n = slope20.length;
+  const pressure: (number | null)[] = new Array(n).fill(null);
+  const level: (0 | 1 | 2 | 3 | null)[] = new Array(n).fill(null);
+  
+  for (let i = 0; i < n; i++) {
+    const s20 = slope20[i];
+    const s60 = slope60[i];
+    const s225 = slope225[i];
+    
+    if (s20 === null || s60 === null || s225 === null) continue;
+    
+    // 加权合成：短期0.3，中期0.3，长期0.4
+    const score = s20 * 0.3 + s60 * 0.3 + s225 * 0.4;
+    pressure[i] = Math.min(Math.round(score), 100);
+    
+    // 压力等级
+    if (score >= 70) level[i] = 3;
+    else if (score >= 50) level[i] = 2;
+    else if (score >= 30) level[i] = 1;
+    else level[i] = 0;
+  }
+  
+  return { pressure, level };
+}
+
+/**
+ * 计算趋势强度和趋势得分
+ * 基于均线排列和斜率判断趋势状态
+ * @returns trendStrength: 趋势强度等级, trendScore: 趋势得分 -100~+100
+ */
+function calculateTrendStrength(
+  ma5: (number | null)[],
+  ma20: (number | null)[],
+  ma60: (number | null)[],
+  ma225: (number | null)[],
+  slope20: (number | null)[],
+  slope60: (number | null)[],
+  slope225: (number | null)[]
+): { 
+  trendStrength: ('strong_bull' | 'bull' | 'neutral' | 'bear' | 'strong_bear' | null)[];
+  trendScore: (number | null)[];
+} {
+  const n = ma5.length;
+  const trendStrength: ('strong_bull' | 'bull' | 'neutral' | 'bear' | 'strong_bear' | null)[] = new Array(n).fill(null);
+  const trendScore: (number | null)[] = new Array(n).fill(null);
+  
+  for (let i = 0; i < n; i++) {
+    const m5 = ma5[i], m20 = ma20[i], m60 = ma60[i], m225 = ma225[i];
+    const s20 = slope20[i], s60 = slope60[i], s225 = slope225[i];
+    
+    if (m5 === null || m20 === null || m60 === null || m225 === null) {
+      trendStrength[i] = null;
+      trendScore[i] = null;
+      continue;
+    }
+    
+    // 均线排列判断
+    const isBullAlignment = m5 > m20 && m20 > m60;
+    const isStrongBullAlignment = isBullAlignment && m60 > m225;
+    const isBearAlignment = m5 < m20 && m20 < m60;
+    const isStrongBearAlignment = isBearAlignment && m60 < m225;
+    
+    // 斜率判断
+    const s20Up = s20 !== null && s20 > 0;
+    const s20Down = s20 !== null && s20 < 0;
+    const s60Up = s60 !== null && s60 > 0;
+    const s60Down = s60 !== null && s60 < 0;
+    const s225Up = s225 !== null && s225 > 0;
+    const s225Down = s225 !== null && s225 < 0;
+    
+    // 计算趋势得分 (-100 ~ +100)
+    let score = 0;
+    
+    // 均线排列得分
+    if (isStrongBullAlignment) score += 40;
+    else if (isBullAlignment) score += 25;
+    else if (isStrongBearAlignment) score -= 40;
+    else if (isBearAlignment) score -= 25;
+    
+    // 斜率得分
+    if (s20Up) score += 20;
+    else if (s20Down) score -= 20;
+    
+    if (s60Up) score += 20;
+    else if (s60Down) score -= 20;
+    
+    if (s225Up) score += 20;
+    else if (s225Down) score -= 20;
+    
+    // 限制在 -100 ~ +100
+    score = Math.max(-100, Math.min(100, score));
+    trendScore[i] = score;
+    
+    // 趋势强度分类
+    if (score >= 70) {
+      trendStrength[i] = 'strong_bull';
+    } else if (score >= 40) {
+      trendStrength[i] = 'bull';
+    } else if (score <= -70) {
+      trendStrength[i] = 'strong_bear';
+    } else if (score <= -40) {
+      trendStrength[i] = 'bear';
+    } else {
+      trendStrength[i] = 'neutral';
+    }
+  }
+  
+  return { trendStrength, trendScore };
+}
+
+/**
  * 计算所有指标
  * @param stockData K线数据
  * @param capital 流通股本（股）
@@ -800,15 +1023,16 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     return emahs[i]! - m;
   });
   
-  // 5. 计算成本偏离度 (股价 - EMAHS)
-  const costDeviation = emahs.map((e, i) => {
-    if (e === null) return null;
-    return closes[i] - e;
+  // 5. 计算成本偏离度 (股价 - MAHS) - 与CRI使用同一成本基准
+  const costDeviation = mahs.map((m, i) => {
+    if (m === null) return null;
+    return closes[i] - m;
   });
   
   // 6. 计算均线系统
   const ma5 = calculateSMA(closes, 5);
   const ma20 = calculateSMA(closes, 20);
+  const ma60 = calculateSMA(closes, 60);
   const ma99 = calculateSMA(closes, 99);
   const ma128 = calculateSMA(closes, 128);
   const ma225 = calculateSMA(closes, 225);
@@ -833,6 +1057,72 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     const greedyValue = greedyResult.greedy[i];
     if (criValue !== null && greedyValue !== null) {
       sentiment[i] = Math.min(Math.max(greedyValue - criValue, -100), 100);
+    }
+  }
+  
+  // 11. 计算斜率因子（替代抵扣价因子）
+  const slope20Raw = calculateMASlope(closes, 20, 5);  // MA20未来5日斜率
+  const slope60Raw = calculateMASlope(closes, 60, 5);  // MA60未来5日斜率
+  const slope225Raw = calculateMASlope(closes, 225, 5); // MA225未来5日斜率
+  
+  // 12. 计算斜率历史分位数
+  const slope20Pct = calculateSlopePercentile(slope20Raw, 120);
+  const slope60Pct = calculateSlopePercentile(slope60Raw, 120);
+  const slope225Pct = calculateSlopePercentile(slope225Raw, 120);
+  
+  // 13. 计算综合斜率压力得分
+  const slopePressureResult = calculateSlopePressure(slope20Pct, slope60Pct, slope225Pct);
+  
+  // 14. 计算趋势强度和趋势得分
+  const { trendStrength, trendScore } = calculateTrendStrength(
+    ma5, ma20, ma60, ma225, slope20Raw, slope60Raw, slope225Raw
+  );
+  
+  // 15. 计算BIAS225历史分位数（使用全部可用历史数据）
+  // 从第225天开始（确保有有效BIAS225值），使用从开始到当前的所有历史
+  const bias225Percentile: (number | null)[] = new Array(stockData.length).fill(null);
+  for (let i = 225; i < stockData.length; i++) {
+    const currentBias = bias225[i];
+    if (currentBias === null) {
+      bias225Percentile[i] = null;
+      continue;
+    }
+    // 收集从第225天到当前日期的所有历史数据（不包含当前值）
+    const history = bias225.slice(225, i).filter((v): v is number => v !== null);
+    if (history.length >= 30) {
+      const sorted = [...history].sort((a, b) => a - b);
+      // 计算有多少历史值小于当前值
+      const lessThan = sorted.filter(v => v < currentBias).length;
+      const equalTo = sorted.filter(v => v === currentBias).length;
+      // 使用线性插值：小于的数量 + 等于数量的一半
+      const rank = lessThan + equalTo / 2;
+      bias225Percentile[i] = (rank / history.length) * 100;
+    } else {
+      bias225Percentile[i] = 50; // 数据不足时默认为中位数
+    }
+  }
+  
+  // 15. 计算成本偏离度历史分位数（使用全部可用历史数据）
+  const costDeviationPercentile: (number | null)[] = new Array(stockData.length).fill(null);
+  const firstValidCostDev = costDeviation.findIndex(v => v !== null);
+  if (firstValidCostDev >= 0) {
+    for (let i = firstValidCostDev + 30; i < stockData.length; i++) {
+      const currentDev = costDeviation[i];
+      if (currentDev === null) {
+        costDeviationPercentile[i] = null;
+        continue;
+      }
+      // 收集从开始到当前的所有历史数据
+      const history = costDeviation.slice(firstValidCostDev, i).filter((v): v is number => v !== null);
+      if (history.length >= 30) {
+        const sorted = [...history].sort((a, b) => a - b);
+        const lessThan = sorted.filter(v => v < currentDev).length;
+        const equalTo = sorted.filter(v => v === currentDev).length;
+        const rank = lessThan + equalTo / 2;
+        costDeviationPercentile[i] = (rank / history.length) * 100;
+      } else {
+        costDeviationPercentile[i] = 50;
+      }
     }
   }
   
@@ -872,6 +1162,7 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     // 均线系统
     ma5: ma5[i],
     ma20: ma20[i],
+    ma60: ma60[i],
     ma99: ma99[i],
     ma128: ma128[i],
     ma225: ma225[i],
@@ -881,6 +1172,18 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     bias99: bias99[i],
     bias128: bias128[i],
     bias225: bias225[i],
+    bias225Percentile: bias225Percentile[i],
+    // 成本偏离度历史分位数
+    costDeviationPercentile: costDeviationPercentile[i],
+    // 斜率因子（替代抵扣价因子）
+    slopePressure: slopePressureResult.pressure[i],
+    slopeLevel: slopePressureResult.level[i],
+    slope20: slope20Raw[i],
+    slope60: slope60Raw[i],
+    slope225: slope225Raw[i],
+    // 趋势强度
+    trendStrength: trendStrength[i],
+    trendScore: trendScore[i],
   }));
 }
 

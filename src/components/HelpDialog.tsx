@@ -26,7 +26,7 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-auto bg-[#161B22] border-[#30363D] text-[#C9D1D9] p-0">
         <DialogHeader className="px-6 pt-6 pb-3 border-b border-[#30363D]">
           <DialogTitle className="text-xl font-bold text-white" style={{ fontFamily: 'JetBrains Mono' }}>
-            Peter量价均线交易系统 - 完整使用手册
+            Peter趋势交易系统 - 完整使用手册
           </DialogTitle>
         </DialogHeader>
         
@@ -54,7 +54,7 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                 <SectionTitle icon={Target} title="系统设计理念" color="text-[#FF3435]" />
                 <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
                   <p className="text-sm text-[#C9D1D9] leading-relaxed mb-3">
-                    <strong className="text-white">Peter量价均线交易系统</strong>是基于"成交量与换手成本关系"的多周期量化交易框架。
+                    <strong className="text-white">Peter趋势交易系统</strong>是基于多维度趋势分析的量化交易框架。
                   </p>
                   <p className="text-sm text-[#8B949E] leading-relaxed mb-3">
                     传统均线系统只看价格，而本系统的核心是<span className="text-[#FF3435]">换手成本(MAHS)</span>——
@@ -269,6 +269,114 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                   </div>
                 </div>
               </section>
+
+              {/* 趋势强度评估 */}
+              <section>
+                <SectionTitle icon={TrendingUp} title="趋势强度评估" color="text-[#58A6FF]" />
+                <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
+                  <p className="text-sm text-[#C9D1D9] mb-3">
+                    基于均线排列和斜率方向，评估当前趋势强度，用于动态调整风险阈值。
+                  </p>
+                  <div className="grid grid-cols-5 gap-2 text-center text-xs">
+                    <div className="p-2 bg-[#03B172]/20 rounded text-[#03B172]">
+                      <div className="font-bold">强多头</div>
+                      <div>≥70分</div>
+                    </div>
+                    <div className="p-2 bg-[#58A6FF]/20 rounded text-[#58A6FF]">
+                      <div className="font-bold">多头</div>
+                      <div>40-69分</div>
+                    </div>
+                    <div className="p-2 bg-[#8B949E]/20 rounded text-[#8B949E]">
+                      <div className="font-bold">震荡</div>
+                      <div>-40~39</div>
+                    </div>
+                    <div className="p-2 bg-[#E3B341]/20 rounded text-[#E3B341]">
+                      <div className="font-bold">空头</div>
+                      <div>-70~-41</div>
+                    </div>
+                    <div className="p-2 bg-[#FF3435]/20 rounded text-[#FF3435]">
+                      <div className="font-bold">强空头</div>
+                      <div>≤-71</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 动态阈值机制 */}
+              <section>
+                <SectionTitle icon={Activity} title="动态阈值机制" color="text-[#E3B341]" />
+                <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
+                  <p className="text-sm text-[#C9D1D9] mb-3">
+                    根据趋势强度动态调整超买阈值，避免强趋势牛股中反复误报。
+                  </p>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between p-2 bg-[#161B22] rounded">
+                      <span className="text-[#8B949E]">强多头趋势</span>
+                      <span className="text-white">超买阈值 95% · 极端 99%</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-[#161B22] rounded">
+                      <span className="text-[#8B949E]">普通多头</span>
+                      <span className="text-white">超买阈值 87% · 极端 95%</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-[#161B22] rounded">
+                      <span className="text-[#8B949E]">震荡/空头</span>
+                      <span className="text-white">超买阈值 80% · 极端 95%</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-[#8B949E] mt-3">
+                    注：机会信号否决使用固定阈值80%，确保高位时始终关闭买入提示。
+                  </p>
+                </div>
+              </section>
+
+              {/* 风险信号分级 */}
+              <section>
+                <SectionTitle icon={AlertTriangle} title="风险信号分级" color="text-[#FF6B6B]" />
+                <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
+                  <div className="space-y-3">
+                    <div className="p-3 bg-[#E3B341]/10 rounded border border-[#E3B341]/30">
+                      <div className="font-bold text-[#E3B341] mb-1">等级1 · 高位钝化（提醒）</div>
+                      <p className="text-xs text-[#8B949E]">
+                        乖离率≥80%但趋势强劲，提示"追高谨慎"，不强制减仓
+                      </p>
+                    </div>
+                    <div className="p-3 bg-[#FF3435]/10 rounded border border-[#FF3435]/30">
+                      <div className="font-bold text-[#FF3435] mb-1">等级2 · 高位超买（行动）</div>
+                      <p className="text-xs text-[#8B949E]">
+                        乖离率≥动态阈值（80%-95%），提示"注意风险"或"建议减仓"
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 斜率因子 */}
+              <section>
+                <SectionTitle icon={GitCommit} title="斜率因子" color="text-[#D2A8FF]" />
+                <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
+                  <p className="text-sm text-[#C9D1D9] mb-3">
+                    计算MA20/MA60/MA225未来5日的预期斜率，评估趋势压力。
+                  </p>
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                    <div className="p-2 bg-[#FF3435]/20 rounded text-[#FF3435]">
+                      <div className="font-bold">强下压</div>
+                      <div>≥3级</div>
+                    </div>
+                    <div className="p-2 bg-[#E3B341]/20 rounded text-[#E3B341]">
+                      <div className="font-bold">中下压</div>
+                      <div>2级</div>
+                    </div>
+                    <div className="p-2 bg-[#D2A8FF]/20 rounded text-[#D2A8FF]">
+                      <div className="font-bold">轻下压</div>
+                      <div>1级</div>
+                    </div>
+                    <div className="p-2 bg-[#03B172]/20 rounded text-[#03B172]">
+                      <div className="font-bold">无压力</div>
+                      <div>0级</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </TabsContent>
             
             {/* 使用说明 */}
@@ -296,12 +404,54 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                     <p className="text-xs text-[#8B949E]">基于实际成交量的市场平均持仓成本，反映真实资金沉淀位置</p>
                   </div>
                   <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
-                    <div className="font-bold text-white mb-1">CRI 恐慌指数</div>
-                    <p className="text-xs text-[#8B949E]">综合成本偏离、跳空风险、波动率等多因子，识别恐慌状态</p>
+                    <div className="font-bold text-white mb-1">乖离率(BIAS225)</div>
+                    <p className="text-xs text-[#8B949E]">价格与225日均线的偏离百分比，极端偏离时存在回归动力</p>
                   </div>
                   <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
-                    <div className="font-bold text-white mb-1">贪婪指数</div>
-                    <p className="text-xs text-[#8B949E]">识别市场过度乐观状态，与恐慌指数形成双向情绪监测</p>
+                    <div className="font-bold text-white mb-1">成本偏离度</div>
+                    <p className="text-xs text-[#8B949E]">当前价格与EMAHS成本的绝对差值，反映盈亏状态</p>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">CRI 综合风险指标</div>
+                    <p className="text-xs text-[#8B949E]">综合成本偏离、跳空风险、波动率、波动百分位四因子</p>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">趋势强度</div>
+                    <p className="text-xs text-[#8B949E]">基于均线排列和斜率方向评估，用于动态调整超买阈值</p>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">斜率因子</div>
+                    <p className="text-xs text-[#8B949E]">MA20/MA60/MA225未来5日预期斜率，评估趋势压力</p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <SectionTitle icon={Target} title="交易信号说明" color="text-[#58A6FF]" />
+                <div className="space-y-3">
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">机会信号</div>
+                    <p className="text-xs text-[#8B949E] mb-2">在低位或趋势回调时出现</p>
+                    <div className="space-y-1 text-xs">
+                      <div className="text-[#03B172]">• BIAS225历史低位 (≤20%分位)</div>
+                      <div className="text-[#03B172]">• 成本偏离度历史低位 (≤15%分位)</div>
+                      <div className="text-[#03B172]">• 趋势回调·MA20/MA60支撑</div>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">风险信号</div>
+                    <p className="text-xs text-[#8B949E] mb-2">在高位或趋势转弱时出现</p>
+                    <div className="space-y-1 text-xs">
+                      <div className="text-[#E3B341]">• 高位钝化 (≥80%分位，强趋势中)</div>
+                      <div className="text-[#FF3435]">• 高位超买 (≥动态阈值)</div>
+                      <div className="text-[#FF3435]">• 趋势下压 (斜率压力≥2级)</div>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">趋势回调买入</div>
+                    <p className="text-xs text-[#8B949E]">
+                      在强多头趋势中，价格回踩MA20/MA60且缩量时出现的特殊机会信号
+                    </p>
                   </div>
                 </div>
               </section>

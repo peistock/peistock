@@ -71,7 +71,7 @@ function parseKlineData(data: any[]): StockData[] {
 }
 
 /**
- * 获取实时行情
+ * 获取实时行情（与东方财富API格式兼容）
  * @param symbol 股票代码
  */
 export async function getQuote(symbol: string): Promise<{
@@ -80,10 +80,7 @@ export async function getQuote(symbol: string): Promise<{
   price: number;
   change: number;
   changePercent: number;
-  open: number;
-  high: number;
-  low: number;
-  volume: number;
+  capital: number; // 流通股本（估算）
 }> {
   const url = `${SINA_QUOTE_API}=${symbol}`;
   
@@ -94,7 +91,6 @@ export async function getQuote(symbol: string): Promise<{
   }
   
   // 新浪返回的是JavaScript变量赋值格式
-  // var hq_str_sh600519="1,贵州茅台,600519,1700.00,1690.00,1705.00,1710.00,1685.00,10000,17000000,1700.00,1701.00,100,1702.00,200,...";
   const text = await response.text();
   
   const match = text.match(/var hq_str_\w+="([^"]*)"/);
@@ -105,17 +101,15 @@ export async function getQuote(symbol: string): Promise<{
   const parts = match[1].split(',');
   
   // 解析字段（A股格式）
-  // 0: 未知 1: 名称 2: 代码 3: 当前价 4: 昨收 5: 今开 6: 最高 7: 最低 8: 成交量
   const name = parts[1] || '';
   const price = parseFloat(parts[3]) || 0;
   const prevClose = parseFloat(parts[4]) || 0;
-  const open = parseFloat(parts[5]) || 0;
-  const high = parseFloat(parts[6]) || 0;
-  const low = parseFloat(parts[7]) || 0;
-  const volume = parseInt(parts[8]) || 0;
-  
   const change = price - prevClose;
   const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+  
+  // 获取真实流通股本
+  const { getStockCapital } = await import('./stockCapital');
+  const capital = getStockCapital(symbol);
   
   return {
     symbol,
@@ -123,35 +117,72 @@ export async function getQuote(symbol: string): Promise<{
     price,
     change,
     changePercent,
-    open,
-    high,
-    low,
-    volume,
+    capital,
   };
 }
 
+
 /**
- * 获取多个时间维度的K线数据
+ * 获取多个时间维度的K线数据（与东方财富API格式兼容）
  * @param symbol 股票代码
  */
 export async function getMultiTimeframeData(symbol: string): Promise<{
   daily: StockData[];
+  weekly: StockData[];
   min15: StockData[];
-  min120: StockData[];
 }> {
   // 并行获取三个时间维度
-  // 日线使用240分钟(4小时)近似
-  const [daily, min15, min120] = await Promise.all([
+  // 日线使用240分钟(4小时)近似，周线使用日线聚合
+  const [daily, min15] = await Promise.all([
     getKlines(symbol, 240, 500),   // 日线 (240分钟)
     getKlines(symbol, 15, 500),    // 15分钟
-    getKlines(symbol, 120, 500),   // 120分钟
   ]);
+  
+  // 从日线数据聚合生成周线数据（每5个交易日）
+  const weekly = aggregateToWeekly(daily);
   
   return {
     daily,
+    weekly,
     min15,
-    min120,
   };
+}
+
+/**
+ * 将日线数据聚合为周线数据
+ */
+function aggregateToWeekly(daily: StockData[]): StockData[] {
+  if (daily.length < 5) return daily;
+  
+  const weekly: StockData[] = [];
+  let currentWeek: StockData[] = [];
+  
+  for (const day of daily) {
+    currentWeek.push(day);
+    
+    // 每5个交易日或最后一个数据点，生成一根周线
+    if (currentWeek.length >= 5 || day === daily[daily.length - 1]) {
+      const weekOpen = currentWeek[0].open;
+      const weekClose = currentWeek[currentWeek.length - 1].close;
+      const weekHigh = Math.max(...currentWeek.map(d => d.high));
+      const weekLow = Math.min(...currentWeek.map(d => d.low));
+      const weekVolume = currentWeek.reduce((sum, d) => sum + d.volume, 0);
+      
+      weekly.push({
+        date: currentWeek[currentWeek.length - 1].date,
+        open: weekOpen,
+        high: weekHigh,
+        low: weekLow,
+        close: weekClose,
+        volume: weekVolume,
+        amount: 0,
+      });
+      
+      currentWeek = [];
+    }
+  }
+  
+  return weekly;
 }
 
 /**

@@ -1,15 +1,15 @@
-import { useState, useCallback } from 'react';
-import { AlertCircle, Settings, Clock, Calendar, BarChart2, BookOpen, Code2 } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockChart from './components/StockChart';
 
 import HelpDialog from './components/HelpDialog';
 import { calculateAllIndicators } from './utils/indicators';
 import { getMultiTimeframeData, getQuote, formatSymbol, getMarketName } from './utils/eastmoneyApi';
+import { getMultiTimeframeData as getSinaMultiData, getQuote as getSinaQuote, formatSymbol as formatSinaSymbol } from './utils/sinaApi';
 import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
+
 
 // 时间维度类型
 type TimeframeType = 'daily' | 'weekly' | 'min15';
@@ -37,9 +37,41 @@ function App() {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [apiSource, setApiSource] = useState<string>('');
   const [showMAHS, setShowMAHS] = useState(true);
   const [showEMAHS, setShowEMAHS] = useState(true);
   const [showMA, setShowMA] = useState(true);
+  
+  // 收藏功能 - 存储代码和名称
+  interface FavoriteItem {
+    symbol: string;
+    name: string;
+  }
+  const [favorites, setFavorites] = useState<FavoriteItem[]>(() => {
+    // 从localStorage读取收藏列表
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('peter_stock_favorites');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+  const [showFavorites, setShowFavorites] = useState(false);
+  
+  // 保存收藏到localStorage
+  useEffect(() => {
+    localStorage.setItem('peter_stock_favorites', JSON.stringify(favorites));
+  }, [favorites]);
+  
+  // 添加/移除收藏
+  const toggleFavorite = useCallback((symbol: string, name: string) => {
+    setFavorites(prev => {
+      const exists = prev.find(item => item.symbol === symbol);
+      if (exists) {
+        return prev.filter(item => item.symbol !== symbol);
+      }
+      return [...prev, { symbol, name }];
+    });
+  }, []);
 
   const handleSearch = useCallback(async (input: string) => {
     const symbol = formatSymbol(input);
@@ -48,11 +80,36 @@ function App() {
     setCurrentSymbol(symbol);
     
     try {
-      // 并行获取三个时间维度的数据和报价信息
-      const [multiData, quote] = await Promise.all([
-        getMultiTimeframeData(symbol),
-        getQuote(symbol),
-      ]);
+      let multiData, quote;
+      let apiSource = '';
+      
+      try {
+        // 尝试东方财富API
+        console.log('尝试东方财富API...');
+        [multiData, quote] = await Promise.all([
+          getMultiTimeframeData(symbol),
+          getQuote(symbol),
+        ]);
+        apiSource = '东方财富数据';
+        console.log('东方财富API成功');
+      } catch (eastmoneyErr: any) {
+        console.log('东方财富API失败:', eastmoneyErr.message || eastmoneyErr);
+        
+        try {
+          // 东方财富失败，切换到新浪API
+          console.log('切换到新浪API备用...');
+          const sinaSymbol = formatSinaSymbol(symbol);
+          [multiData, quote] = await Promise.all([
+            getSinaMultiData(sinaSymbol),
+            getSinaQuote(sinaSymbol),
+          ]);
+          apiSource = '新浪数据';
+          console.log('新浪API成功');
+        } catch (sinaErr: any) {
+          console.log('新浪API也失败:', sinaErr.message || sinaErr);
+          throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 新浪: ${sinaErr.message || '失败'}`);
+        }
+      }
       
       // 使用流通股本计算指标
       const capital = quote.capital;
@@ -82,12 +139,37 @@ function App() {
         changePercent: quote.changePercent,
         capital: quote.capital,
       });
+      
+      // 更新API来源显示
+      setApiSource(apiSource);
     } catch (err: any) {
-      setError(err.message || '获取数据失败，请检查股票代码是否正确');
+      console.error('完整错误:', err);
+      const msg = err.message || '';
+      if (msg.includes('Load failed') || msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
+        setError(`数据源访问失败。这可能是由于：
+1. 浏览器安全限制（CORS）
+2. API暂时不可用
+3. 网络连接问题
+
+请尝试：
+• 刷新页面后重试
+• 更换浏览器（推荐Chrome/Edge）
+• 检查网络连接
+
+技术详情：${msg.slice(0, 100)}`);
+      } else {
+        setError(err.message || '获取数据失败，请检查股票代码是否正确');
+      }
     } finally {
       setLoading(false);
     }
   }, []);
+  
+  // 从收藏快速搜索（放在handleSearch之后避免依赖问题）
+  const searchFromFavorite = useCallback((item: FavoriteItem) => {
+    handleSearch(item.symbol);
+    setShowFavorites(false);
+  }, [handleSearch]);
 
   // 检查是否有数据
   const hasData = timeframeData.daily && timeframeData.weekly && timeframeData.min15;
@@ -114,13 +196,65 @@ function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white" style={{ fontFamily: 'JetBrains Mono' }}>
-                  Peter量价均线交易系统
+                  Peter趋势交易系统
                 </h1>
-                <p className="text-xs text-[#8B949E]">东方财富数据 | 双周期成本共振分析</p>
+                <p className="text-xs text-[#8B949E]">{apiSource || '东方财富/新浪数据'}</p>
               </div>
             </div>
             
             <div className="flex items-center gap-4">
+              {/* 收藏按钮 */}
+              <div className="relative">
+                <button 
+                  onClick={() => setShowFavorites(!showFavorites)}
+                  className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-[#E3B341] transition-colors"
+                >
+                  <Star className={`w-4 h-4 ${favorites.length > 0 ? 'fill-[#E3B341] text-[#E3B341]' : ''}`} />
+                  收藏{favorites.length > 0 && `(${favorites.length})`}
+                </button>
+                
+                {/* 收藏列表下拉 */}
+                {showFavorites && (
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-[#161B22] border border-[#30363D] rounded-lg shadow-xl z-50">
+                    <div className="p-2 border-b border-[#30363D] flex items-center justify-between">
+                      <span className="text-xs text-[#8B949E]">我的收藏</span>
+                      <button 
+                        onClick={() => setShowFavorites(false)}
+                        className="text-[#8B949E] hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {favorites.length === 0 ? (
+                      <div className="p-3 text-xs text-[#8B949E]">暂无收藏</div>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto">
+                        {favorites.map(item => (
+                          <div 
+                            key={item.symbol}
+                            className="flex items-center justify-between px-3 py-2 hover:bg-[#0D1117] cursor-pointer group"
+                            onClick={() => searchFromFavorite(item)}
+                          >
+                            <span className="text-sm text-[#C9D1D9] flex-1">
+                              {item.name}
+                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFavorite(item.symbol, item.name);
+                              }}
+                              className="text-[#8B949E] hover:text-[#FF3435] opacity-0 group-hover:opacity-100 transition-opacity px-2"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
               <HelpDialog defaultTab="overview">
                 <button className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors">
                   <BookOpen className="w-4 h-4" />
@@ -145,7 +279,15 @@ function App() {
           <StockSearch 
             onSearch={handleSearch} 
             loading={loading} 
-            stockInfo={stockInfo} 
+            stockInfo={stockInfo}
+            isFavorite={stockInfo ? favorites.some(f => f.symbol === stockInfo.symbol) : false}
+            onToggleFavorite={stockInfo ? () => toggleFavorite(stockInfo.symbol, stockInfo.name) : undefined}
+            showMAHS={showMAHS}
+            onToggleMAHS={setShowMAHS}
+            showEMAHS={showEMAHS}
+            onToggleEMAHS={setShowEMAHS}
+            showMA={showMA}
+            onToggleMA={setShowMA}
           />
         </section>
 
@@ -155,53 +297,6 @@ function App() {
             <AlertCircle className="w-4 h-4 text-[#FF3435]" />
             <AlertDescription className="text-[#FF3435]">{error}</AlertDescription>
           </Alert>
-        )}
-
-        {/* Chart Controls */}
-        {hasData && (
-          <div className="flex flex-wrap items-center gap-6 p-4 bg-[#161B22] rounded-xl border border-[#30363D] mb-6">
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-[#8B949E]" />
-              <span className="text-sm text-[#8B949E]">指标显示:</span>
-            </div>
-            
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="mahs"
-                  checked={showMAHS}
-                  onCheckedChange={setShowMAHS}
-                />
-                <Label htmlFor="mahs" className="text-sm text-white cursor-pointer flex items-center gap-2">
-                  <span className="w-3 h-0.5 bg-[#FF3435]" />
-                  MAHS
-                </Label>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="emahs"
-                  checked={showEMAHS}
-                  onCheckedChange={setShowEMAHS}
-                />
-                <Label htmlFor="emahs" className="text-sm text-white cursor-pointer flex items-center gap-2">
-                  <span className="w-3 h-0.5 bg-[#03B172]" />
-                  EMAHS
-                </Label>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="ma"
-                  checked={showMA}
-                  onCheckedChange={setShowMA}
-                />
-                <Label htmlFor="ma" className="text-sm text-white cursor-pointer">
-                  均线系统
-                </Label>
-              </div>
-            </div>
-          </div>
         )}
 
         {/* Three Charts - Left/Right Layout */}
@@ -218,34 +313,60 @@ function App() {
               const buySignals: string[] = [];
               const sellSignals: string[] = [];
               
-              // 基于BIAS225历史极值的信号计算
-              const allBias225 = data.indicators
-                .map(d => d.bias225)
-                .filter((v): v is number => v !== null);
+              // 趋势强度分析
+              const trendStrength = lastIndicator.trendStrength;
+              const trendScore = lastIndicator.trendScore || 0;
               
-              const currentBias225 = lastIndicator.bias225;
-              let bias225Percentile: number | null = null;
+              // 动态超买阈值计算
+              // 强多头趋势：阈值=95%，普通多头：阈值=87.5%，其他：阈值=80%
+              let overboughtThreshold = 80;
+              let extremeOverboughtThreshold = 95;
               
-              if (currentBias225 !== null && allBias225.length > 0) {
-                // 计算当前BIAS225在历史数据中的百分位
-                const sorted = [...allBias225].sort((a, b) => a - b);
-                const rank = sorted.findIndex(v => v >= currentBias225);
-                bias225Percentile = rank >= 0 ? (rank / sorted.length) * 100 : 100;
-                
-                // 极值信号：90%以上重点推荐，80%以上提示
-                if (bias225Percentile <= 10) {
-                  buySignals.push(`BIAS225历史极端低位 (${bias225Percentile.toFixed(1)}%分位)`);
-                } else if (bias225Percentile <= 20) {
-                  buySignals.push(`BIAS225低于历史80%水平 (${bias225Percentile.toFixed(1)}%分位)`);
+              if (trendStrength === 'strong_bull') {
+                overboughtThreshold = 95;
+                extremeOverboughtThreshold = 99;
+              } else if (trendStrength === 'bull') {
+                overboughtThreshold = 87;
+                extremeOverboughtThreshold = 95;
+              }
+              
+              // 注：超卖阈值在强趋势中暂不启用，避免过度复杂化
+              // 高位风险判定
+              const bias225Pct = lastIndicator.bias225Percentile;
+              const costDevPct = lastIndicator.costDeviationPercentile;
+              
+              // 固定阈值（用于机会信号否决）- 无论趋势如何，80%分位即视为高位
+              const isPriceHighFixed = (bias225Pct !== null && bias225Pct >= 80) || 
+                                       (costDevPct !== null && costDevPct >= 80);
+              
+              // 动态阈值（用于风险信号分级）
+              const isPriceExtremeOverbought = (bias225Pct !== null && bias225Pct >= extremeOverboughtThreshold) || 
+                                               (costDevPct !== null && costDevPct >= extremeOverboughtThreshold);
+              const isPriceOverbought = (bias225Pct !== null && bias225Pct >= overboughtThreshold) || 
+                                        (costDevPct !== null && costDevPct >= overboughtThreshold);
+              
+              // 高位钝化判断（乖离率高但趋势强劲）
+              const isHighBiasWithStrongTrend = (trendStrength === 'strong_bull' || trendStrength === 'bull') && 
+                                                ((bias225Pct !== null && bias225Pct >= 80 && bias225Pct < overboughtThreshold) ||
+                                                 (costDevPct !== null && costDevPct >= 80 && costDevPct < overboughtThreshold));
+              
+              // ========== BIAS225历史分位数信号 ==========
+              // 当已触发高位超买时，跳过单独的BIAS信号避免重复
+              if (bias225Pct !== null && !isPriceOverbought) {
+                if (bias225Pct <= 10) {
+                  buySignals.push(`BIAS225历史极端低位 (${bias225Pct.toFixed(1)}%分位)`);
+                } else if (bias225Pct <= 20) {
+                  buySignals.push(`BIAS225低于历史80%水平 (${bias225Pct.toFixed(1)}%分位)`);
                 }
                 
-                if (bias225Percentile >= 90) {
-                  sellSignals.push(`BIAS225历史极端高位 (${bias225Percentile.toFixed(1)}%分位)`);
-                } else if (bias225Percentile >= 80) {
-                  sellSignals.push(`BIAS225高于历史80%水平 (${bias225Percentile.toFixed(1)}%分位)`);
+                if (bias225Pct >= 90) {
+                  sellSignals.push(`BIAS225历史极端高位 (${bias225Pct.toFixed(1)}%分位)`);
+                } else if (bias225Pct >= 80) {
+                  sellSignals.push(`BIAS225高于历史80%水平 (${bias225Pct.toFixed(1)}%分位)`);
                 }
               }
               
+              // 成本差穿越零轴信号
               if (lastIndicator.costDiff !== null && prevIndicator?.costDiff !== null) {
                 if (lastIndicator.costDiff > 0 && prevIndicator.costDiff <= 0) {
                   buySignals.push('成本差上穿零轴 - 短期转强');
@@ -254,12 +375,221 @@ function App() {
                   sellSignals.push('成本差下穿零轴 - 短期转弱');
                 }
               }
-              if (lastIndicator.mahs !== null) {
-                if (lastIndicator.close < lastIndicator.mahs * 1.02) {
-                  buySignals.push('价格在成本附近 (低于2%)');
+              
+              // ========== 成本偏离度历史分位数信号 ==========
+              // 当已触发高位超买时，跳过单独的成本偏离度信号避免重复
+              if (costDevPct !== null && !isPriceOverbought) {
+                if (costDevPct <= 5) {
+                  buySignals.push(`成本偏离度历史极端低位 (${costDevPct.toFixed(1)}%分位)`);
+                } else if (costDevPct <= 15) {
+                  buySignals.push(`成本偏离度低于历史85%水平 (${costDevPct.toFixed(1)}%分位)`);
                 }
-                if (lastIndicator.close > lastIndicator.mahs * 1.08) {
-                  sellSignals.push('价格高于成本8%以上');
+                
+                if (costDevPct >= 95) {
+                  sellSignals.push(`成本偏离度历史极端高位 (${costDevPct.toFixed(1)}%分位)`);
+                } else if (costDevPct >= 85) {
+                  sellSignals.push(`成本偏离度高于历史85%水平 (${costDevPct.toFixed(1)}%分位)`);
+                }
+              }
+              
+              // ========== CRI独立风险信号（最高优先级）==========
+              const criValue = lastIndicator.cri;
+              const criPct = lastIndicator.criPercentile;
+              const criState = lastIndicator.criState;
+              const volState = lastIndicator.volumeState;
+              const slopeLvl = lastIndicator.slopeLevel || 0;
+              const slopePct = lastIndicator.slopePressure || 0;
+              
+              // CRI风险信号：结合绝对值和历史分位数
+              if (criValue !== null && criPct !== null) {
+                // 极高CRI（绝对值≥70）：直接触发
+                if (criValue >= 90) {
+                  sellSignals.push(`极度恐慌 (CRI:${criValue.toFixed(1)})`);
+                } else if (criValue >= 80) {
+                  sellSignals.push(`高度恐慌 (CRI:${criValue.toFixed(1)})`);
+                } else if (criValue >= 70) {
+                  sellSignals.push(`中度恐慌 (CRI:${criValue.toFixed(1)})`);
+                }
+                
+                // CRI历史极端高位（但绝对值<70时不触发恐慌信号，仅提示）
+                if (criPct >= 95 && criValue >= 50) {
+                  sellSignals.push(`CRI历史极端高位 (${criPct.toFixed(0)}%分位)`);
+                } else if (criPct >= 90 && criValue >= 50) {
+                  sellSignals.push(`CRI高于历史90% (${criPct.toFixed(0)}%分位)`);
+                }
+              }
+              
+              // ========== 斜率因子三维决策矩阵 ==========
+              // 高斜率压力预警
+              if (slopeLvl >= 3) {
+                sellSignals.push(`趋势下压·强 (${slopePct.toFixed(0)}分)`);
+              } else if (slopeLvl >= 2) {
+                sellSignals.push(`趋势下压·中 (${slopePct.toFixed(0)}分)`);
+              }
+              
+              // CRI极端高位（恐慌分位数高）
+              // 注意：isPriceExtremeOverbought 和 isPriceOverbought 已在上面定义
+              const isCRIExtremeHigh = criPct !== null && criPct >= 95;
+              const isCRIHigh = criPct !== null && criPct >= 80;
+              
+              // 三维组合判断（CRI≥70才视为有效恐慌）
+              const isRealPanic = criState === 'panic' && criValue !== null && criValue >= 70;
+              const isNormalState = criState !== 'panic' || (criValue !== null && criValue < 70);
+              
+              if (isRealPanic && slopeLvl >= 2) {
+                sellSignals.push('恐慌+下压：建议清仓');
+              } else if (isRealPanic && volState === 'extreme-shrink') {
+                buySignals.push('恐慌·缩量：可能洗盘，观望');
+              } else if (slopeLvl >= 2 && volState === 'expand') {
+                sellSignals.push('下压·放量：下跌趋势确认');
+              } else if (isNormalState && slopeLvl === 0 && volState === 'shrink' && !isPriceHighFixed) {
+                // 机会信号否决条件：使用固定阈值80%，无论趋势如何
+                buySignals.push('正常·无压·缩量：关注反弹');
+              } else if (isNormalState && slopeLvl === 0 && volState === 'shrink' && isPriceHighFixed) {
+                // 价格高位（>80%分位）时抑制机会信号，改为风险提示
+                if (trendStrength === 'strong_bull' || trendStrength === 'bull') {
+                  sellSignals.push('高位钝化·缩量：趋势中回调，追高谨慎');
+                } else {
+                  sellSignals.push('高位超买·缩量：警惕回调风险');
+                }
+              }
+              
+              // ========== 趋势回调买入信号 ==========
+              // 在强趋势背景下，价格回调至关键均线附近的机会
+              if ((trendStrength === 'strong_bull' || trendStrength === 'bull') && 
+                  lastIndicator.ma20 !== null && lastIndicator.ma60 !== null) {
+                
+                const close = lastIndicator.close;
+                const ma20 = lastIndicator.ma20;
+                const ma60 = lastIndicator.ma60;
+                
+                // 条件1：价格回踩MA20或MA60且获得支撑（未跌破）
+                const nearMA20 = close >= ma20 * 0.98 && close <= ma20 * 1.02; // 在MA20 ±2%范围内
+                const nearMA60 = close >= ma60 * 0.98 && close <= ma60 * 1.02; // 在MA60 ±2%范围内
+                
+                // 条件2：CRI未进入极端恐慌（分位<70%）
+                const criNotExtreme = criPct !== null && criPct < 70;
+                
+                // 条件3：成交量萎缩（VR<0.8）
+                const volumeShrinking = volState === 'extreme-shrink' || volState === 'shrink';
+                
+                if ((nearMA20 || nearMA60) && criNotExtreme && volumeShrinking) {
+                  const maLabel = nearMA20 ? 'MA20' : 'MA60';
+                  buySignals.push(`趋势回调·${maLabel}支撑 (BIAS:${bias225Pct?.toFixed(0)}%分位) - 关注买入`);
+                }
+              }
+              
+              // 高位钝化提示（等级1警告）：乖离率高但趋势强劲
+              if (isHighBiasWithStrongTrend) {
+                const trendLabel = trendStrength === 'strong_bull' ? '强多头' : '多头';
+                sellSignals.push(`高位钝化·${trendLabel} (BIAS:${bias225Pct?.toFixed(0)}%·趋势:${trendScore.toFixed(0)}分) - 追高谨慎`);
+              }
+              
+              // 高位超买独立风险信号（等级2警告）：真正的超买
+              if (isPriceExtremeOverbought) {
+                const thresholdLabel = extremeOverboughtThreshold === 99 ? '99%' : '95%';
+                sellSignals.push(`极端超买·${thresholdLabel}阈值 (BIAS:${bias225Pct?.toFixed(0)}%·成本:${costDevPct?.toFixed(0)}%) - 建议减仓`);
+              } else if (isPriceOverbought) {
+                const thresholdLabel = overboughtThreshold === 95 ? '95%' : (overboughtThreshold === 87 ? '87%' : '80%');
+                sellSignals.push(`高位超买·${thresholdLabel}阈值 (BIAS:${bias225Pct?.toFixed(0)}%·成本:${costDevPct?.toFixed(0)}%) - 注意风险`);
+              }
+              
+              // CRI高位独立风险信号（与价格超买区分）
+              if (isCRIExtremeHigh) {
+                sellSignals.push(`CRI极端高位 (${criPct?.toFixed(0)}%分位)`);
+              } else if (isCRIHigh) {
+                sellSignals.push(`CRI高位 (${criPct?.toFixed(0)}%分位)`);
+              }
+              
+              // ========== 状态机模式（方案B）==========
+              // 定义市场状态
+              type MarketState = 'panic' | 'trend_down' | 'overbought' | 'normal';
+              let marketState: MarketState = 'normal';
+              let stateTitle = '';
+              let stateColor = '';
+              let stateDesc = '';
+              
+              if ((criValue !== null && criValue >= 80) || isCRIExtremeHigh) {
+                // 恐慌状态：CRI >= 80 或 CRI分位数 >= 95%
+                marketState = 'panic';
+                stateTitle = '恐慌状态';
+                stateColor = '#FF3435';
+                stateDesc = '情绪极度悲观，暂停左侧交易，等待风险释放';
+              } else if (slopeLvl >= 2) {
+                // 趋势下压状态：斜率压力 >= 2且CRI正常
+                marketState = 'trend_down';
+                stateTitle = '趋势下压';
+                stateColor = '#E3B341';
+                stateDesc = '中长期趋势承压，不轻易抄底，等待趋势企稳';
+              } else if (isPriceExtremeOverbought) {
+                // 极端超买状态（价格）- 动态阈值
+                marketState = 'overbought';
+                stateTitle = trendStrength === 'strong_bull' ? '极端超买·强趋势' : '极端超买';
+                stateColor = '#D2A8FF';
+                stateDesc = trendStrength === 'strong_bull' 
+                  ? `股价极高(${extremeOverboughtThreshold}%阈值)，但趋势强劲，密切关注趋势变化`
+                  : '股价处于历史极端高位，建议减仓或观望';
+              } else if (isPriceOverbought) {
+                // 高位超买状态（价格）- 动态阈值
+                marketState = 'overbought';
+                stateTitle = trendStrength === 'strong_bull' ? '高位超买·强趋势' : '高位超买';
+                stateColor = '#E3B341';
+                stateDesc = trendStrength === 'strong_bull' || trendStrength === 'bull'
+                  ? `股价偏高(${overboughtThreshold}%阈值)，趋势支撑中，暂不强制减仓`
+                  : '股价相对历史持仓成本偏高，谨慎追高';
+              } else if (isPriceHighFixed && (trendStrength === 'strong_bull' || trendStrength === 'bull')) {
+                // 高位钝化状态：>80%分位但未达动态阈值，趋势强劲
+                marketState = 'overbought';
+                stateTitle = '高位钝化·强趋势';
+                stateColor = '#E3B341';
+                stateDesc = `股价处于历史高位(${bias225Pct?.toFixed(0)}%分位)，趋势支撑中，追高谨慎，等待回调`;
+              } else if (isPriceHighFixed) {
+                // 高位状态（非强趋势）
+                marketState = 'overbought';
+                stateTitle = '高位超买';
+                stateColor = '#E3B341';
+                stateDesc = '股价处于历史高位，谨慎追高';
+              } else if (trendStrength === 'strong_bull') {
+                // 强多头趋势状态
+                marketState = 'normal';
+                stateTitle = '强多头趋势';
+                stateColor = '#03B172';
+                stateDesc = '趋势强劲，可持股待涨，关注回调买入机会';
+              } else if (trendStrength === 'bull') {
+                // 多头趋势状态
+                marketState = 'normal';
+                stateTitle = '多头趋势';
+                stateColor = '#58A6FF';
+                stateDesc = '趋势向上，可积极操作';
+              } else {
+                // 正常状态
+                marketState = 'normal';
+                stateTitle = '正常状态';
+                stateColor = '#03B172';
+                stateDesc = '可综合评估机会与风险信号';
+              }
+              
+              // 根据状态调整信号显示
+              let displayBuySignals = [...buySignals];
+              let displaySellSignals = [...sellSignals];
+              
+              if (marketState === 'panic') {
+                // 恐慌状态：机会信号降级，添加警告
+                if (displayBuySignals.length > 0) {
+                  displayBuySignals = displayBuySignals.map(s => `⚠️ ${s}`);
+                  displayBuySignals.unshift('【左侧信号暂停】');
+                }
+              } else if (marketState === 'trend_down') {
+                // 趋势下压状态：左侧信号权重降低
+                if (displayBuySignals.length > 0) {
+                  displayBuySignals = displayBuySignals.map(s => `△ ${s}`);
+                  displayBuySignals.unshift('【等待趋势企稳】');
+                }
+              } else if (marketState === 'overbought') {
+                // 高位超买状态：机会信号被抑制
+                if (displayBuySignals.length > 0) {
+                  displayBuySignals = displayBuySignals.map(s => `❌ ${s}`);
+                  displayBuySignals.unshift('【高位超买，机会信号关闭】');
                 }
               }
               
@@ -285,7 +615,7 @@ function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-0">
                     {/* Left: Chart - 占3/4宽度 */}
                     <div className="lg:col-span-3 p-4">
-                      <div className="h-[450px]">
+                      <div className="h-[600px]">
                         <StockChart
                           stockData={data.data}
                           indicators={data.indicators}
@@ -299,161 +629,231 @@ function App() {
                     </div>
                     
                     {/* Right: Indicators & Signals - 占1/4宽度 */}
-                    <div className="lg:col-span-1 p-4 space-y-4 border-l border-[#30363D] bg-[#0D1117]">
-                      {/* Turnover Cost - 只有日K显示 */}
+                    <div className="lg:col-span-1 p-3 space-y-2 border-l border-[#30363D] bg-[#0D1117] overflow-y-auto max-h-[600px]">
+                      {/* CRI + 斜率因子 - 只有日K显示 */}
                       {tf === 'daily' && (
-                        <div className="space-y-3">
-                          <h4 className="text-xs font-medium text-[#8B949E] uppercase tracking-wider">换手成本</h4>
-                          
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="p-3 bg-[#161B22] rounded-lg border border-[#30363D]">
-                              <div className="text-xs text-[#8B949E] mb-1">MAHS</div>
-                              <div className="text-lg font-bold text-[#FF3435]" style={{ fontFamily: 'JetBrains Mono' }}>
-                                {lastIndicator?.mahs?.toFixed(2) || '-'}
-                              </div>
+                        <div className="space-y-2">
+                          {/* 市场状态机（方案B）*/}
+                          <div className="p-2 rounded-lg border" style={{ 
+                            backgroundColor: `${stateColor}15`,
+                            borderColor: `${stateColor}40`
+                          }}>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px]" style={{ color: stateColor }}>状态</span>
+                              <span className="text-[10px] font-bold" style={{ color: stateColor }}>{stateTitle}</span>
                             </div>
-                            <div className="p-3 bg-[#161B22] rounded-lg border border-[#30363D]">
-                              <div className="text-xs text-[#8B949E] mb-1">EMAHS</div>
-                              <div className="text-lg font-bold text-[#03B172]" style={{ fontFamily: 'JetBrains Mono' }}>
-                                {lastIndicator?.emahs?.toFixed(2) || '-'}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="p-3 bg-[#161B22] rounded-lg border border-[#30363D]">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs text-[#8B949E]">成本差</span>
-                              {lastIndicator?.costDiff !== null && lastIndicator?.costDiff !== undefined && (
-                                <span className={`text-xs ${lastIndicator.costDiff >= 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}`}>
-                                  {lastIndicator.costDiff >= 0 ? '↗' : '↘'}
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-xl font-bold ${lastIndicator?.costDiff && lastIndicator.costDiff >= 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}`} style={{ fontFamily: 'JetBrains Mono' }}>
-                              {lastIndicator?.costDiff?.toFixed(2) || '-'}
+                            <div className="text-[9px] leading-tight mt-0.5" style={{ color: stateColor, opacity: 0.9 }}>
+                              {stateDesc}
                             </div>
                           </div>
                           
                           {/* CRI - 综合风险指标 v2.0 */}
-                          <div className="p-3 bg-[#161B22] rounded-lg border border-[#30363D]">
+                          <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
                             <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs text-[#8B949E]">CRI（综合风险指标）</span>
-                              {lastIndicator?.cri !== null && lastIndicator?.cri !== undefined && (
-                                <span className={`text-xs ${
-                                  lastIndicator.criState === 'panic' ? 'text-[#FF3435]' : 
-                                  lastIndicator.criState === 'complacent' ? 'text-[#03B172]' : 
-                                  (lastIndicator.criPercentile !== null && lastIndicator.criPercentile >= 80) ? 'text-[#E3B341]' : 'text-[#8B949E]'
-                                }`}>
-                                  {/* 三条件综合评价：CRI分位数 + 价格位置 + 成交量状态 */}
-                                  {(() => {
-                                    const criPct = lastIndicator.criPercentile;
-                                    const isBelowMAHS = lastIndicator.close < (lastIndicator.mahs || Infinity);
-                                    const volState = lastIndicator.volumeState;
-                                    
-                                    // 成交量状态描述
-                                    const volDesc = volState === 'extreme-shrink' ? '极度缩量' :
-                                                   volState === 'shrink' ? '缩量' :
-                                                   volState === 'expand' ? '放量' :
-                                                   volState === 'extreme-expand' ? '极度放量' : '正常量';
-                                    
-                                    // 三条件组合判断
-                                    if (criPct !== null && criPct >= 80 && isBelowMAHS) {
-                                      // 恐慌状态 + 成交量修饰
-                                      if (volState === 'extreme-shrink') return `恐慌·洗盘? (${volDesc})`;
-                                      if (volState === 'expand' || volState === 'extreme-expand') return `恐慌·放量 (${volDesc})`;
-                                      return `恐慌状态 (${volDesc})`;
-                                    } else if (criPct !== null && criPct >= 60 && isBelowMAHS) {
-                                      return `偏高·下跌 (${volDesc})`;
-                                    } else if (criPct !== null && criPct <= 20 && !isBelowMAHS) {
-                                      // 自满状态 + 成交量修饰
-                                      if (volState === 'extreme-expand') return `自满·出货? (${volDesc})`;
-                                      return `自满状态 (${volDesc})`;
-                                    } else {
-                                      return criPct !== null ? 
-                                        (criPct >= 60 ? `偏高 (${criPct.toFixed(0)}%分位·${volDesc})` : 
-                                         criPct <= 20 ? `低位 (${criPct.toFixed(0)}%分位·${volDesc})` : 
-                                         `正常 (${criPct.toFixed(0)}%分位·${volDesc})`) : '正常区间';
-                                    }
-                                  })()}
-                                </span>
-                              )}
+                              <span className="text-[10px] text-[#8B949E]">综合风险指标(CRI)</span>
+                              <span className="text-[10px] text-[#8B949E]">
+                                量比:{lastIndicator?.vr?.toFixed(1) || '-'}
+                              </span>
                             </div>
-                            <div className={`text-2xl font-bold ${
-                              lastIndicator?.criState === 'panic' ? 'text-[#FF3435]' : 
-                              lastIndicator?.criState === 'complacent' ? 'text-[#03B172]' : 
-                              (lastIndicator?.criPercentile !== null && lastIndicator.criPercentile >= 80) ? 'text-[#E3B341]' : 
-                              (lastIndicator?.criPercentile !== null && lastIndicator.criPercentile >= 60) ? 'text-[#8B949E]' : 'text-[#03B172]'
-                            }`} style={{ fontFamily: 'JetBrains Mono' }}>
-                              {lastIndicator?.cri?.toFixed(1) || '-'}
+                            <div className="flex items-baseline gap-2 mb-1">
+                              <span className={`text-xl font-bold ${
+                                lastIndicator?.criState === 'panic' ? 'text-[#FF3435]' : 
+                                lastIndicator?.criState === 'complacent' ? 'text-[#03B172]' : 
+                                (lastIndicator?.criPercentile !== null && lastIndicator.criPercentile >= 80) ? 'text-[#E3B341]' : 
+                                (lastIndicator?.criPercentile !== null && lastIndicator.criPercentile >= 60) ? 'text-[#8B949E]' : 'text-[#03B172]'
+                              }`} style={{ fontFamily: 'JetBrains Mono' }}>
+                                {lastIndicator?.cri?.toFixed(1) || '-'}
+                              </span>
+                              <span className="text-[10px] text-[#8B949E]">
+                                {lastIndicator?.criPercentile?.toFixed(0) || '-'}%分位
+                              </span>
                             </div>
-                            <div className="text-xs text-[#8B949E] mt-1">
-                              VR: {lastIndicator?.vr?.toFixed(2) || '-'}x · 
-                              {lastIndicator?.volumeState === 'extreme-shrink' ? '极度缩量' :
-                               lastIndicator?.volumeState === 'shrink' ? '缩量' :
-                               lastIndicator?.volumeState === 'expand' ? '放量' :
-                               lastIndicator?.volumeState === 'extreme-expand' ? '极度放量' : '正常量'}
-                            </div>
-                            
                             {/* CRI 成分详情 */}
                             {lastIndicator?.criComponents && (
-                              <div className="mt-2 pt-2 border-t border-[#30363D] grid grid-cols-2 gap-1 text-xs">
-                                <div className="flex justify-between">
-                                  <span className="text-[#8B949E]">成本偏离</span>
+                              <div className="pt-1 border-t border-[#30363D] grid grid-cols-4 gap-1 text-[9px]">
+                                <div className="text-center">
+                                  <span className="text-[#8B949E] block">成本偏离</span>
                                   <span className="text-[#FF6B6B]">{lastIndicator.criComponents.basis.toFixed(0)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#8B949E]">跳跃风险</span>
+                                <div className="text-center">
+                                  <span className="text-[#8B949E] block">跳跃风险</span>
                                   <span className="text-[#E3B341]">{lastIndicator.criComponents.jump.toFixed(0)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#8B949E]">波动曲线</span>
+                                <div className="text-center">
+                                  <span className="text-[#8B949E] block">波动曲线</span>
                                   <span className="text-[#D2A8FF]">{lastIndicator.criComponents.curve.toFixed(0)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-[#8B949E]">波动百分位</span>
+                                <div className="text-center">
+                                  <span className="text-[#8B949E] block">波动百分位</span>
                                   <span className="text-[#79C0FF]">{lastIndicator.criComponents.percentile.toFixed(0)}</span>
                                 </div>
                               </div>
                             )}
                           </div>
+                          
+                          {/* BIAS225 & 成本偏离度 - 详细显示 */}
+                          <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
+                            {/* BIAS225 乖离率 */}
+                            <div className="mb-1">
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="text-[#8B949E]">乖离率(BIAS225)</span>
+                                <span className="text-[#8B949E]">
+                                  分位:{lastIndicator?.bias225Percentile !== null ? `${lastIndicator.bias225Percentile.toFixed(0)}%` : '-'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-[#8B949E]">数值</span>
+                                <span className="text-sm font-bold" style={{ 
+                                  fontFamily: 'JetBrains Mono',
+                                  color: lastIndicator?.bias225Percentile !== null && lastIndicator!.bias225Percentile! <= 20 ? '#03B172' :
+                                         lastIndicator?.bias225Percentile !== null && lastIndicator!.bias225Percentile! >= 80 ? '#FF3435' : '#C9D1D9'
+                                }}>
+                                  {lastIndicator?.bias225?.toFixed(2) ?? '-'}
+                                </span>
+                              </div>
+                            </div>
+                            {/* 分隔线 */}
+                            <div className="border-t border-[#30363D] my-1" />
+                            {/* 成本偏离度 */}
+                            <div>
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="text-[#8B949E]">成本偏离度</span>
+                                <span className="text-[#8B949E]">
+                                  分位:{lastIndicator?.costDeviationPercentile !== null ? `${lastIndicator.costDeviationPercentile.toFixed(0)}%` : '-'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-[#8B949E]">数值</span>
+                                <span className="text-sm font-bold" style={{ 
+                                  fontFamily: 'JetBrains Mono',
+                                  color: lastIndicator?.costDeviationPercentile !== null && lastIndicator!.costDeviationPercentile! <= 15 ? '#03B172' :
+                                         lastIndicator?.costDeviationPercentile !== null && lastIndicator!.costDeviationPercentile! >= 85 ? '#FF3435' : '#C9D1D9'
+                                }}>
+                                  {lastIndicator?.costDeviation?.toFixed(2) ?? '-'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* 趋势强度 & 斜率 - 详细显示 */}
+                          <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
+                            <div className="flex items-center justify-between text-[10px] mb-1">
+                              <span className="text-[#8B949E]">趋势强度</span>
+                              <span className={
+                                lastIndicator?.trendStrength === 'strong_bull' ? 'text-[#03B172]' :
+                                lastIndicator?.trendStrength === 'bull' ? 'text-[#58A6FF]' :
+                                lastIndicator?.trendStrength === 'bear' ? 'text-[#E3B341]' :
+                                lastIndicator?.trendStrength === 'strong_bear' ? 'text-[#FF3435]' :
+                                'text-[#8B949E]'
+                              }>
+                                {lastIndicator?.trendStrength === 'strong_bull' ? '强多头' :
+                                 lastIndicator?.trendStrength === 'bull' ? '多头' :
+                                 lastIndicator?.trendStrength === 'bear' ? '空头' :
+                                 lastIndicator?.trendStrength === 'strong_bear' ? '强空头' :
+                                 '震荡'}
+                                ({lastIndicator?.trendScore?.toFixed(0) ?? '-'}分)
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] mb-1">
+                              <span className="text-[#8B949E]">斜率压力</span>
+                              <span className={
+                                (lastIndicator?.slopeLevel || 0) >= 3 ? 'text-[#FF3435]' : 
+                                (lastIndicator?.slopeLevel || 0) >= 2 ? 'text-[#E3B341]' : 
+                                (lastIndicator?.slopeLevel || 0) >= 1 ? 'text-[#D2A8FF]' :
+                                'text-[#03B172]'
+                              }>
+                                {lastIndicator?.slopePressure?.toFixed(0) ?? '-'}
+                              </span>
+                            </div>
+                            <div className="text-[9px] text-[#8B949E] pt-1 border-t border-[#30363D] space-y-0.5">
+                              <div className="flex justify-between">
+                                <span>MA20:</span>
+                                <span className={lastIndicator?.slope20 && lastIndicator.slope20 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
+                                  {lastIndicator?.slope20?.toFixed(2) ?? '-'}%
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>MA60:</span>
+                                <span className={lastIndicator?.slope60 && lastIndicator.slope60 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
+                                  {lastIndicator?.slope60?.toFixed(2) ?? '-'}%
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>MA225:</span>
+                                <span className={lastIndicator?.slope225 && lastIndicator.slope225 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
+                                  {lastIndicator?.slope225?.toFixed(2) ?? '-'}%
+                                </span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                       
-                      {/* Opportunity Signals */}
-                      <div>
-                        <h4 className="text-xs font-medium text-[#8B949E] uppercase tracking-wider mb-2">机会信号</h4>
-                        <div className="p-3 bg-[#FF3435]/5 rounded-lg border border-[#FF3435]/20">
-                          {buySignals.length > 0 ? (
-                            <ul className="space-y-1.5 text-xs">
-                              {buySignals.map((s, i) => (
-                                <li key={i} className="flex items-start gap-2 text-[#C9D1D9]">
-                                  <span className="text-[#FF3435] mt-0.5">●</span>
-                                  {s}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span className="text-xs text-[#8B949E]">暂无机会信号</span>
-                          )}
+                      {/* Signals - 并排显示节省空间 */}
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {/* Opportunity Signals */}
+                        <div>
+                          <h4 className="text-[10px] font-medium text-[#8B949E] uppercase tracking-wider mb-1 flex items-center">
+                            机会信号
+                            {marketState !== 'normal' && (
+                              <span className="ml-1 text-[9px] px-1 py-0.5 rounded" style={{ 
+                                backgroundColor: `${stateColor}30`,
+                                color: stateColor
+                              }}>
+                                {marketState === 'panic' ? '暂停' : 
+                                 marketState === 'overbought' ? '关闭' : '谨慎'}
+                              </span>
+                            )}
+                          </h4>
+                          <div className="p-2 bg-[#FF3435]/5 rounded-lg border border-[#FF3435]/20 min-h-[50px] max-h-[120px] overflow-y-auto">
+                            {displayBuySignals.length > 0 ? (
+                              <ul className="space-y-1 text-[10px]">
+                                {displayBuySignals.map((s, i) => (
+                                  <li key={i} className="flex items-start gap-1.5 text-[#C9D1D9]">
+                                    <span className="text-[#FF3435] mt-0.5">●</span>
+                                    <span className="leading-tight">{s}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span className="text-[10px] text-[#8B949E]">
+                                {marketState === 'panic' ? '【暂停】' : 
+                                 marketState === 'trend_down' ? '【等待企稳】' : 
+                                 marketState === 'overbought' ? '【关闭】' :
+                                 '暂无'}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      
-                      {/* Risk Signals */}
-                      <div>
-                        <h4 className="text-xs font-medium text-[#8B949E] uppercase tracking-wider mb-2">风险信号</h4>
-                        <div className="p-3 bg-[#03B172]/5 rounded-lg border border-[#03B172]/20">
-                          {sellSignals.length > 0 ? (
-                            <ul className="space-y-1.5 text-xs">
-                              {sellSignals.map((s, i) => (
-                                <li key={i} className="flex items-start gap-2 text-[#C9D1D9]">
-                                  <span className="text-[#03B172] mt-0.5">●</span>
-                                  {s}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span className="text-xs text-[#8B949E]">暂无风险信号</span>
-                          )}
+                        
+                        {/* Risk Signals */}
+                        <div>
+                          <h4 className="text-[10px] font-medium text-[#8B949E] uppercase tracking-wider mb-1 flex items-center flex-wrap gap-1">
+                            风险信号
+                            {marketState === 'panic' && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[#FF3435]/30 text-[#FF3435]">强</span>
+                            )}
+                            {marketState === 'trend_down' && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[#E3B341]/30 text-[#E3B341]">优先</span>
+                            )}
+                            {marketState === 'overbought' && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-[#D2A8FF]/30 text-[#D2A8FF]">高位</span>
+                            )}
+                          </h4>
+                          <div className="p-2 bg-[#03B172]/5 rounded-lg border border-[#03B172]/20 min-h-[50px] max-h-[120px] overflow-y-auto">
+                            {displaySellSignals.length > 0 ? (
+                              <ul className="space-y-1 text-[10px]">
+                                {displaySellSignals.map((s, i) => (
+                                  <li key={i} className="flex items-start gap-1.5 text-[#C9D1D9]">
+                                    <span className="text-[#03B172] mt-0.5">●</span>
+                                    <span className="leading-tight">{s}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span className="text-[10px] text-[#8B949E]">暂无</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -495,7 +895,7 @@ function App() {
                 </svg>
               </div>
               <span className="text-sm text-[#8B949E]">
-                Peter量价均线交易系统 - 东方财富数据
+                Peter趋势交易系统 - {apiSource || '东方财富/新浪数据'}
               </span>
             </div>
             <p className="text-xs text-[#484F58]">

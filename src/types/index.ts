@@ -45,6 +45,7 @@ export interface IndicatorData {
   // 均线系统
   ma5: number | null;
   ma20: number | null;
+  ma60: number | null;
   ma99: number | null;
   ma128: number | null;
   ma225: number | null;
@@ -54,6 +55,18 @@ export interface IndicatorData {
   bias99: number | null;
   bias128: number | null;
   bias225: number | null;
+  bias225Percentile: number | null; // BIAS225历史分位数
+  // 成本偏离度历史分位数
+  costDeviationPercentile: number | null;
+  // 斜率因子（替代抵扣价因子）
+  slopePressure: number | null; // 综合斜率压力得分 0-100
+  slopeLevel: 0 | 1 | 2 | 3 | null; // 斜率压力等级 0=无 1=短期 2=中短期 3=全面
+  slope20: number | null; // MA20未来5日斜率（%）
+  slope60: number | null; // MA60未来5日斜率（%）
+  slope225: number | null; // MA225未来5日斜率（%）
+  // 趋势强度
+  trendStrength: 'strong_bull' | 'bull' | 'neutral' | 'bear' | 'strong_bear' | null;
+  trendScore: number | null; // 趋势得分 -100~+100
 }
 
 export interface StockInfo {

@@ -42,6 +42,90 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     // const sentimentData = indicators.map(d => d.sentiment);
     const costDeviationData = indicators.map(d => d.costDeviation);
 
+    // 计算抵扣价标注数据
+    const lastIndex = indicators.length - 1;
+    const ma20DeductIndex = lastIndex >= 19 ? lastIndex - 19 : -1;
+    const ma60DeductIndex = lastIndex >= 59 ? lastIndex - 59 : -1;
+    const ma225DeductIndex = lastIndex >= 224 ? lastIndex - 224 : -1;
+    
+    // 构建抵扣价markPoint数据
+    const deductMarkPoints: echarts.MarkPointComponentOption['data'] = [];
+    
+    if (ma20DeductIndex >= 0) {
+      const price = stockData[ma20DeductIndex]?.close;
+      if (price !== undefined) {
+        deductMarkPoints.push({
+          name: `MA20\n${price.toFixed(1)}`,
+          coord: [ma20DeductIndex, price],
+          value: price,
+          symbol: 'rect',
+          symbolSize: [1, 4],
+          itemStyle: { color: '#E3B341' },
+          label: {
+            show: true,
+            position: 'top',
+            distance: 3,
+            fontSize: 7,
+            color: '#E3B341',
+            backgroundColor: 'rgba(13,17,23,0.85)',
+            padding: [0, 2],
+            borderRadius: 1,
+            borderWidth: 0,
+          },
+        });
+      }
+    }
+    
+    if (ma60DeductIndex >= 0) {
+      const price = stockData[ma60DeductIndex]?.close;
+      if (price !== undefined) {
+        deductMarkPoints.push({
+          name: `MA60\n${price.toFixed(1)}`,
+          coord: [ma60DeductIndex, price],
+          value: price,
+          symbol: 'rect',
+          symbolSize: [1, 4],
+          itemStyle: { color: '#D2A8FF' },
+          label: {
+            show: true,
+            position: 'top',
+            distance: 3,
+            fontSize: 7,
+            color: '#D2A8FF',
+            backgroundColor: 'rgba(13,17,23,0.85)',
+            padding: [0, 2],
+            borderRadius: 1,
+            borderWidth: 0,
+          },
+        });
+      }
+    }
+    
+    if (ma225DeductIndex >= 0) {
+      const price = stockData[ma225DeductIndex]?.close;
+      if (price !== undefined) {
+        deductMarkPoints.push({
+          name: `MA225\n${price.toFixed(1)}`,
+          coord: [ma225DeductIndex, price],
+          value: price,
+          symbol: 'rect',
+          symbolSize: [1, 4],
+          itemStyle: { color: '#FF3435' },
+          label: {
+            show: true,
+            position: 'top',
+            distance: 3,
+            fontSize: 7,
+            color: '#FF3435',
+            backgroundColor: 'rgba(13,17,23,0.85)',
+            padding: [0, 2],
+            borderRadius: 1,
+            borderWidth: 0,
+          },
+        });
+      }
+    }
+
     const series: echarts.SeriesOption[] = [
       {
         name: 'K线',
@@ -52,6 +136,12 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           color0: '#03B172',
           borderColor: '#FF3435',
           borderColor0: '#03B172',
+        },
+        markPoint: {
+          symbol: 'rect',
+          symbolSize: [1, 4],
+          silent: true,
+          data: deductMarkPoints,
         },
       },
     ];
@@ -168,12 +258,41 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       } : undefined,
       legend: {
         data: timeframe === 'daily' 
-          ? ['K线', 'MA5', 'MA20', 'MA99', 'MA128', 'MA225', 'MAHS', 'EMAHS', '成交量趋势', '恐慌指数', '贪婪指数', '成本偏离度']
-          : ['K线', 'MA5', 'MA20', 'MA99', 'MA128', 'MA225', 'MAHS', 'EMAHS', '恐慌指数', '贪婪指数', '成本偏离度'],
-        textStyle: { color: '#8B949E', fontSize: compact ? 10 : 12 },
-        top: title ? (compact ? 25 : 35) : (compact ? 5 : 10),
-        itemWidth: compact ? 12 : 20,
-        itemHeight: compact ? 8 : 12,
+          ? [
+              { name: 'MA5', icon: 'rect', itemStyle: { color: '#FFFFFF' } },
+              { name: 'MA20', icon: 'rect', itemStyle: { color: '#E3B341' } },
+              { name: 'MA99', icon: 'rect', itemStyle: { color: '#D2A8FF' } },
+              { name: 'MA128', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: 'MA225', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'MAHS', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'EMAHS', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '成交量趋势', icon: 'rect', itemStyle: { color: '#8B949E' } },
+              { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
+              { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
+            ]
+          : [
+              { name: 'MA5', icon: 'rect', itemStyle: { color: '#FFFFFF' } },
+              { name: 'MA20', icon: 'rect', itemStyle: { color: '#E3B341' } },
+              { name: 'MA99', icon: 'rect', itemStyle: { color: '#D2A8FF' } },
+              { name: 'MA128', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: 'MA225', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'MAHS', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'EMAHS', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
+              { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
+            ],
+        textStyle: { color: '#8B949E', fontSize: compact ? 7 : 8 },
+        top: 32,
+        itemWidth: 10,
+        itemHeight: 2,
+        itemGap: 4,
+        width: '96%',
+        left: 'center',
+        type: 'scroll',
+        pageIconSize: 10,
+        pageTextStyle: { fontSize: 8 }
       },
       tooltip: {
         trigger: 'axis',
@@ -211,8 +330,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         },
       },
       grid: [
-        { left: '50', right: '50', top: '50', height: timeframe === 'daily' || timeframe === 'weekly' ? '55%' : '62%' },
-        { left: '50', right: '50', top: timeframe === 'daily' || timeframe === 'weekly' ? '70%' : '76%', height: timeframe === 'daily' || timeframe === 'weekly' ? '25%' : '18%' },
+        { left: '50', right: '50', top: '55', bottom: '110', height: '58%' },  // 主图
+        { left: '50', right: '50', top: '76%', bottom: '40', height: '16%' },  // 副图下移，避免与主图重叠
       ],
       xAxis: [
         {
@@ -344,7 +463,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
   }, [stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe]);
 
   return (
-    <div className={`relative w-full bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${compact ? 'h-full' : 'h-[500px]'}`}>
+    <div className={`relative w-full bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${compact ? 'h-full' : 'h-[600px]'}`}>
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#161B22]">
           <div className="flex items-center gap-3">

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, Database, Clock } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { formatCapital } from '@/utils/indicators';
 
 interface StockSearchProps {
@@ -16,6 +18,15 @@ interface StockSearchProps {
     changePercent: number;
     capital: number;
   } | null;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
+  // 指标显示控制
+  showMAHS?: boolean;
+  onToggleMAHS?: (value: boolean) => void;
+  showEMAHS?: boolean;
+  onToggleEMAHS?: (value: boolean) => void;
+  showMA?: boolean;
+  onToggleMA?: (value: boolean) => void;
 }
 
 // 最近搜索存储键
@@ -28,7 +39,10 @@ interface RecentSearch {
   timestamp: number;
 }
 
-const StockSearch = ({ onSearch, loading, stockInfo }: StockSearchProps) => {
+const StockSearch = ({ 
+  onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
+  showMAHS, onToggleMAHS, showEMAHS, onToggleEMAHS, showMA, onToggleMA 
+}: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
 
@@ -150,6 +164,65 @@ const StockSearch = ({ onSearch, loading, stockInfo }: StockSearchProps) => {
             <div className="text-sm text-[#8B949E]">{stockInfo.name} · {stockInfo.market}</div>
           </div>
           <div className="flex-1" />
+          
+          {/* 指标控制开关 */}
+          {onToggleMAHS && onToggleEMAHS && onToggleMA && (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="mahs"
+                  checked={showMAHS}
+                  onCheckedChange={onToggleMAHS}
+                  className="data-[state=checked]:bg-[#FF3435]"
+                />
+                <Label htmlFor="mahs" className="text-sm text-[#8B949E] cursor-pointer flex items-center gap-1.5">
+                  <span className="w-2 h-0.5 bg-[#FF3435]" />
+                  MAHS
+                </Label>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="emahs"
+                  checked={showEMAHS}
+                  onCheckedChange={onToggleEMAHS}
+                  className="data-[state=checked]:bg-[#03B172]"
+                />
+                <Label htmlFor="emahs" className="text-sm text-[#8B949E] cursor-pointer flex items-center gap-1.5">
+                  <span className="w-2 h-0.5 bg-[#03B172]" />
+                  EMAHS
+                </Label>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="ma"
+                  checked={showMA}
+                  onCheckedChange={onToggleMA}
+                  className="data-[state=checked]:bg-[#58A6FF]"
+                />
+                <Label htmlFor="ma" className="text-sm text-[#8B949E] cursor-pointer">
+                  MA
+                </Label>
+              </div>
+            </div>
+          )}
+
+          <div className="w-px h-8 bg-[#30363D]" />
+          
+          {/* 收藏按钮 */}
+          {onToggleFavorite && (
+            <button
+              onClick={onToggleFavorite}
+              className="p-2 rounded-lg border border-[#30363D] hover:border-[#E3B341] transition-colors"
+              title={isFavorite ? '取消收藏' : '添加收藏'}
+            >
+              <Star 
+                className={`w-5 h-5 ${isFavorite ? 'fill-[#E3B341] text-[#E3B341]' : 'text-[#8B949E]'}`} 
+              />
+            </button>
+          )}
+          
           <div className="flex items-center gap-6">
             {/* 流通股本 */}
             <div className="text-right">
