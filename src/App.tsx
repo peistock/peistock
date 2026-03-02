@@ -317,20 +317,34 @@ function App() {
               const trendStrength = lastIndicator.trendStrength;
               const trendScore = lastIndicator.trendScore || 0;
               
-              // 动态超买阈值计算
-              // 强多头趋势：阈值=95%，普通多头：阈值=87.5%，其他：阈值=80%
+              // ADX趋势强度分析
+              const adx = lastIndicator.adx;
+              const adxState = lastIndicator.adxState;
+              const pvtDivergence = lastIndicator.pvtDivergence;
+              
+              // 根据ADX判断趋势强度等级
+              const isADXStrongTrend = adx !== null && adx >= 40 && adxState === 'rising';
+              const isADXWeakening = adx !== null && adx >= 40 && adxState === 'falling';
+              
+              // 动态超买阈值计算（结合趋势强度和ADX）
+              // 强趋势+ADX强：阈值=99%，普通强趋势：阈值=95%，普通多头：阈值=87%，其他：阈值=80%
               let overboughtThreshold = 80;
               let extremeOverboughtThreshold = 95;
               
-              if (trendStrength === 'strong_bull') {
-                overboughtThreshold = 95;
+              if (trendStrength === 'strong_bull' && isADXStrongTrend) {
+                overboughtThreshold = 99; // 强趋势+ADX上升，极高容忍度
+                extremeOverboughtThreshold = 99;
+              } else if (trendStrength === 'strong_bull' || isADXStrongTrend) {
+                overboughtThreshold = 95; // 强趋势或ADX强
                 extremeOverboughtThreshold = 99;
               } else if (trendStrength === 'bull') {
                 overboughtThreshold = 87;
                 extremeOverboughtThreshold = 95;
+              } else if (isADXWeakening) {
+                overboughtThreshold = 87; // ADX从高位回落，降低容忍度
+                extremeOverboughtThreshold = 95;
               }
               
-              // 注：超卖阈值在强趋势中暂不启用，避免过度复杂化
               // 高位风险判定
               const bias225Pct = lastIndicator.bias225Percentile;
               const costDevPct = lastIndicator.costDeviationPercentile;
@@ -345,10 +359,16 @@ function App() {
               const isPriceOverbought = (bias225Pct !== null && bias225Pct >= overboughtThreshold) || 
                                         (costDevPct !== null && costDevPct >= overboughtThreshold);
               
-              // 高位钝化判断（乖离率高但趋势强劲）
-              const isHighBiasWithStrongTrend = (trendStrength === 'strong_bull' || trendStrength === 'bull') && 
-                                                ((bias225Pct !== null && bias225Pct >= 80 && bias225Pct < overboughtThreshold) ||
-                                                 (costDevPct !== null && costDevPct >= 80 && costDevPct < overboughtThreshold));
+              // 高位钝化判断（考虑ADX）
+              // ADX强且上升时，即使乖离率高也视为钝化而非超买
+              const isHighBiasWithStrongTrend = 
+                ((trendStrength === 'strong_bull' || trendStrength === 'bull') || isADXStrongTrend) && 
+                ((bias225Pct !== null && bias225Pct >= 80 && bias225Pct < overboughtThreshold) ||
+                 (costDevPct !== null && costDevPct >= 80 && costDevPct < overboughtThreshold));
+              
+              // PVT背离风险判定
+              const hasPVTTopDivergence = pvtDivergence === 'top';
+              const hasPVTBottomDivergence = pvtDivergence === 'bottom';
               
               // ========== BIAS225历史分位数信号 ==========
               // 当已触发高位超买时，跳过单独的BIAS信号避免重复
@@ -425,6 +445,21 @@ function App() {
                 sellSignals.push(`趋势下压·强 (${slopePct.toFixed(0)}分)`);
               } else if (slopeLvl >= 2) {
                 sellSignals.push(`趋势下压·中 (${slopePct.toFixed(0)}分)`);
+              }
+              
+              // ========== PVT背离信号（量价背离）==========
+              // PVT顶背离：价格新高但PVT未新高，提示量价背离风险
+              if (hasPVTTopDivergence) {
+                const adxLabel = isADXStrongTrend ? '·ADX强劲' : isADXWeakening ? '·ADX回落' : '';
+                sellSignals.push(`PVT顶背离${adxLabel}：价格与量能背离，建议减仓`);
+              }
+              // PVT底背离：价格新低但PVT未新低，增强反弹预期
+              if (hasPVTBottomDivergence && !isPriceHighFixed) {
+                // 只有当CRI值较高且不在恐慌状态时才强化为买入信号
+                const criValueHighAndNotPanic = criValue !== null && criValue >= 50 && criState !== 'panic';
+                if (criValueHighAndNotPanic) {
+                  buySignals.push('PVT底背离+CRI高回落：反弹动能增强');
+                }
               }
               
               // CRI极端高位（恐慌分位数高）
@@ -786,6 +821,49 @@ function App() {
                               </div>
                             </div>
                           </div>
+                          
+                          {/* ADX & PVT - 趋势强度与量价背离 */}
+                          <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
+                            <div className="flex items-center justify-between text-[10px] mb-1">
+                              <span className="text-[#8B949E]">ADX趋势强度</span>
+                              <span className={
+                                (lastIndicator?.adx || 0) >= 40 ? 'text-[#03B172]' : 
+                                (lastIndicator?.adx || 0) >= 20 ? 'text-[#E3B341]' : 
+                                'text-[#8B949E]'
+                              }>
+                                {lastIndicator?.adx?.toFixed(0) ?? '-'}
+                                {(lastIndicator?.adxState === 'rising' && (lastIndicator?.adx || 0) >= 40) ? '↑' : 
+                                 (lastIndicator?.adxState === 'falling' && (lastIndicator?.adx || 0) >= 40) ? '↓' :
+                                 lastIndicator?.adxState === 'rising' ? '↗' :
+                                 lastIndicator?.adxState === 'falling' ? '↘' : ''}
+                              </span>
+                            </div>
+                            <div className="text-[9px] text-[#8B949E] pt-1 border-t border-[#30363D] space-y-0.5">
+                              <div className="flex justify-between">
+                                <span>趋势:</span>
+                                <span className={
+                                  (lastIndicator?.adx || 0) >= 40 ? 'text-[#03B172]' : 
+                                  (lastIndicator?.adx || 0) >= 20 ? 'text-[#E3B341]' : 
+                                  'text-[#FF3435]'
+                                }>
+                                  {(lastIndicator?.adx || 0) >= 40 ? '强' : 
+                                   (lastIndicator?.adx || 0) >= 20 ? '中等' : '弱(震荡)'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>PVT:</span>
+                                <span className={
+                                  lastIndicator?.pvtDivergence === 'top' ? 'text-[#FF3435]' :
+                                  lastIndicator?.pvtDivergence === 'bottom' ? 'text-[#03B172]' :
+                                  'text-[#8B949E]'
+                                }>
+                                  {lastIndicator?.pvt?.toFixed(0) ?? '-'}
+                                  {lastIndicator?.pvtDivergence === 'top' ? '⚠️顶背离' :
+                                   lastIndicator?.pvtDivergence === 'bottom' ? '底背离' : ''}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                       
@@ -805,12 +883,12 @@ function App() {
                               </span>
                             )}
                           </h4>
-                          <div className="p-2 bg-[#FF3435]/5 rounded-lg border border-[#FF3435]/20 min-h-[50px] max-h-[120px] overflow-y-auto">
+                          <div className="p-2 bg-[#03B172]/5 rounded-lg border border-[#03B172]/20 min-h-[50px] max-h-[120px] overflow-y-auto">
                             {displayBuySignals.length > 0 ? (
                               <ul className="space-y-1 text-[10px]">
                                 {displayBuySignals.map((s, i) => (
                                   <li key={i} className="flex items-start gap-1.5 text-[#C9D1D9]">
-                                    <span className="text-[#FF3435] mt-0.5">●</span>
+                                    <span className="text-[#03B172] mt-0.5">●</span>
                                     <span className="leading-tight">{s}</span>
                                   </li>
                                 ))}
