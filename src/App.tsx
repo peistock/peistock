@@ -313,31 +313,51 @@ function App() {
               const buySignals: string[] = [];
               const sellSignals: string[] = [];
               
-              // 趋势强度分析
+              // 趋势强度分析（统一使用ADX作为标准）
               const trendStrength = lastIndicator.trendStrength;
-              const trendScore = lastIndicator.trendScore || 0;
               
               // ADX趋势强度分析
               const adx = lastIndicator.adx;
               const adxState = lastIndicator.adxState;
               const pvtDivergence = lastIndicator.pvtDivergence;
               
+              // PVT背离风险判定（提前声明供后续使用）
+              const hasPVTTopDivergence = pvtDivergence === 'top';
+              // 底背离需要过滤高位区域（使用BIAS225判断）
+              const bias225 = lastIndicator.bias225;
+              const isPriceHigh = bias225 !== null && bias225 > 10; // BIAS>10%视为高位
+              // 只有不在高位时才视为有效底背离
+              const hasPVTBottomDivergence = pvtDivergence === 'bottom' && !isPriceHigh;
+              
               // 根据ADX判断趋势强度等级
               const isADXStrongTrend = adx !== null && adx >= 40 && adxState === 'rising';
               const isADXWeakening = adx !== null && adx >= 40 && adxState === 'falling';
               
+              // 统一趋势级别判断（供多处使用）
+              const getTrendLevel = () => {
+                if (adx === null) return 'weak';
+                if (hasPVTTopDivergence && adxState === 'falling') return 'weak'; // 顶背离+ADX回落=趋势转弱
+                if (hasPVTTopDivergence) return 'medium'; // 有顶背离时最高算中等
+                if (adx >= 40) return 'strong';
+                if (adx >= 20) return 'medium';
+                return 'weak';
+              };
+              
+              const trendLevel = getTrendLevel();
+              const isStrongTrend = trendLevel === 'strong';
+              const isMediumTrend = trendLevel === 'medium';
+              
               // 动态超买阈值计算（结合趋势强度和ADX）
-              // 强趋势+ADX强：阈值=99%，普通强趋势：阈值=95%，普通多头：阈值=87%，其他：阈值=80%
               let overboughtThreshold = 80;
               let extremeOverboughtThreshold = 95;
               
-              if (trendStrength === 'strong_bull' && isADXStrongTrend) {
+              if (isStrongTrend && isADXStrongTrend) {
                 overboughtThreshold = 99; // 强趋势+ADX上升，极高容忍度
                 extremeOverboughtThreshold = 99;
-              } else if (trendStrength === 'strong_bull' || isADXStrongTrend) {
+              } else if (isStrongTrend || isADXStrongTrend) {
                 overboughtThreshold = 95; // 强趋势或ADX强
                 extremeOverboughtThreshold = 99;
-              } else if (trendStrength === 'bull') {
+              } else if (isMediumTrend) {
                 overboughtThreshold = 87;
                 extremeOverboughtThreshold = 95;
               } else if (isADXWeakening) {
@@ -359,16 +379,12 @@ function App() {
               const isPriceOverbought = (bias225Pct !== null && bias225Pct >= overboughtThreshold) || 
                                         (costDevPct !== null && costDevPct >= overboughtThreshold);
               
-              // 高位钝化判断（考虑ADX）
-              // ADX强且上升时，即使乖离率高也视为钝化而非超买
+              // 高位钝化判断（使用统一的趋势标准）
+              // 强趋势或中等趋势（无顶背离）+ 乖离率高但未达超买阈值
               const isHighBiasWithStrongTrend = 
-                ((trendStrength === 'strong_bull' || trendStrength === 'bull') || isADXStrongTrend) && 
+                (isStrongTrend || (isMediumTrend && !hasPVTTopDivergence)) && 
                 ((bias225Pct !== null && bias225Pct >= 80 && bias225Pct < overboughtThreshold) ||
                  (costDevPct !== null && costDevPct >= 80 && costDevPct < overboughtThreshold));
-              
-              // PVT背离风险判定
-              const hasPVTTopDivergence = pvtDivergence === 'top';
-              const hasPVTBottomDivergence = pvtDivergence === 'bottom';
               
               // ========== BIAS225历史分位数信号 ==========
               // 当已触发高位超买时，跳过单独的BIAS信号避免重复
@@ -450,15 +466,23 @@ function App() {
               // ========== PVT背离信号（量价背离）==========
               // PVT顶背离：价格新高但PVT未新高，提示量价背离风险
               if (hasPVTTopDivergence) {
-                const adxLabel = isADXStrongTrend ? '·ADX强劲' : isADXWeakening ? '·ADX回落' : '';
-                sellSignals.push(`PVT顶背离${adxLabel}：价格与量能背离，建议减仓`);
+                // ADX回落时顶背离风险更高
+                if (isADXWeakening) {
+                  sellSignals.push('⚠️ 价量顶背离：ADX回落，建议减仓');
+                } else {
+                  sellSignals.push('⚠️ 价量顶背离：价格与量能背离，建议减仓');
+                }
               }
               // PVT底背离：价格新低但PVT未新低，增强反弹预期
+              // 条件：底背离 + 非高位 + (恐慌解除 或 ADX上升)
               if (hasPVTBottomDivergence && !isPriceHighFixed) {
-                // 只有当CRI值较高且不在恐慌状态时才强化为买入信号
-                const criValueHighAndNotPanic = criValue !== null && criValue >= 50 && criState !== 'panic';
-                if (criValueHighAndNotPanic) {
-                  buySignals.push('PVT底背离+CRI高回落：反弹动能增强');
+                const panicRelieved = criState !== 'panic' || (criValue !== null && criValue < 60);
+                const adxRising = adxState === 'rising';
+                
+                if (panicRelieved && adxRising) {
+                  buySignals.push('✅ 价量底背离：ADX上升，可左侧试探');
+                } else if (panicRelieved) {
+                  buySignals.push('✅ 价量底背离：恐慌解除，关注反弹');
                 }
               }
               
@@ -516,8 +540,9 @@ function App() {
               
               // 高位钝化提示（等级1警告）：乖离率高但趋势强劲
               if (isHighBiasWithStrongTrend) {
-                const trendLabel = trendStrength === 'strong_bull' ? '强多头' : '多头';
-                sellSignals.push(`高位钝化·${trendLabel} (BIAS:${bias225Pct?.toFixed(0)}%·趋势:${trendScore.toFixed(0)}分) - 追高谨慎`);
+                const trendLabel = isStrongTrend ? '强趋势' : '多头';
+                const adxLabel = adx !== null ? `ADX:${adx.toFixed(0)}` : '';
+                sellSignals.push(`高位钝化·${trendLabel} (${adxLabel}) - 追高谨慎`);
               }
               
               // 高位超买独立风险信号（等级2警告）：真正的超买
@@ -536,72 +561,191 @@ function App() {
                 sellSignals.push(`CRI高位 (${criPct?.toFixed(0)}%分位)`);
               }
               
-              // ========== 状态机模式（方案B）==========
-              // 定义市场状态
+              // ========== 市场状态决策树（按权重优先级）==========
+              // 权重：CRI(最高) > 极端位置(双90%+/95%+/100%) > 趋势(斜率+ADX) > PVT背离 > 一般位置
               type MarketState = 'panic' | 'trend_down' | 'overbought' | 'normal';
               let marketState: MarketState = 'normal';
               let stateTitle = '';
               let stateColor = '';
               let stateDesc = '';
               
+              // 辅助判断
+              const hasSlopePressure = slopeLvl >= 2;
+              const adxRising = adxState === 'rising';
+              const adxFalling = adxState === 'falling';
+              
+              // 极端位置判断（BIAS和成本偏离同时≥90%视为极端危险）
+              const isDualExtremeHigh = (bias225Pct !== null && bias225Pct >= 90) && 
+                                        (costDevPct !== null && costDevPct >= 90);
+              const isSingleExtremeHigh = (bias225Pct !== null && bias225Pct >= 95) || 
+                                          (costDevPct !== null && costDevPct >= 95);
+              const isHistoricalExtreme = (bias225Pct !== null && bias225Pct >= 99) || 
+                                          (costDevPct !== null && costDevPct >= 99);
+              
+              // ===== 第一层：CRI极端风险（权重最高）=====
               if ((criValue !== null && criValue >= 80) || isCRIExtremeHigh) {
-                // 恐慌状态：CRI >= 80 或 CRI分位数 >= 95%
                 marketState = 'panic';
                 stateTitle = '恐慌状态';
                 stateColor = '#FF3435';
-                stateDesc = '情绪极度悲观，暂停左侧交易，等待风险释放';
-              } else if (slopeLvl >= 2) {
-                // 趋势下压状态：斜率压力 >= 2且CRI正常
+                stateDesc = 'CRI极端风险，情绪极度悲观，暂停左侧交易，等待风险释放';
+              }
+              // ===== 第二层：极端位置风险（双90%+或95%+，权重第二）=====
+              else if (isHistoricalExtreme) {
+                marketState = 'overbought';
+                if (isStrongTrend) {
+                  stateTitle = '历史极值·ADX强';
+                  stateColor = '#D2A8FF';
+                  stateDesc = '股价创历史新高极值(99%+)，即使ADX强也需警惕，建议减仓';
+                } else {
+                  stateTitle = '历史极值·高风险';
+                  stateColor = '#FF3435';
+                  stateDesc = '股价创历史新高极值(99%+)，强烈建议减仓';
+                }
+              } else if (isDualExtremeHigh) {
+                marketState = 'overbought';
+                if (hasPVTTopDivergence) {
+                  stateTitle = '双指标极端·顶背离';
+                  stateColor = '#FF3435';
+                  stateDesc = 'BIAS和成本偏离均超90%且顶背离，危险信号，必须减仓';
+                } else if (isStrongTrend) {
+                  stateTitle = '双指标极端·ADX强';
+                  stateColor = '#FF3435';
+                  stateDesc = 'BIAS和成本偏离均超90%，即使ADX强也需警惕，建议减仓';
+                } else {
+                  stateTitle = '双指标极端·高风险';
+                  stateColor = '#FF3435';
+                  stateDesc = 'BIAS和成本偏离均超90%，强烈建议减仓';
+                }
+              } else if (isSingleExtremeHigh) {
+                marketState = 'overbought';
+                if (hasPVTTopDivergence) {
+                  stateTitle = '单指标极端·顶背离';
+                  stateColor = '#FF3435';
+                  stateDesc = '单一指标超95%且顶背离，高风险，建议减仓';
+                } else if (isStrongTrend) {
+                  stateTitle = '单指标极端·ADX强';
+                  stateColor = '#E3B341';
+                  stateDesc = '单一指标超95%，ADX强趋势支撑，密切关注';
+                } else {
+                  stateTitle = '单指标极端';
+                  stateColor = '#E3B341';
+                  stateDesc = '单一指标超95%，建议减仓';
+                }
+              }
+              // ===== 第三层：趋势因子（斜率压制）=====
+              else if (hasSlopePressure) {
                 marketState = 'trend_down';
-                stateTitle = '趋势下压';
-                stateColor = '#E3B341';
-                stateDesc = '中长期趋势承压，不轻易抄底，等待趋势企稳';
-              } else if (isPriceExtremeOverbought) {
-                // 极端超买状态（价格）- 动态阈值
+                if (hasPVTTopDivergence) {
+                  stateTitle = '斜率压制·顶背离';
+                  stateColor = '#FF3435';
+                  stateDesc = '中长期斜率压制+PVT顶背离，下跌趋势确认，建议减仓';
+                } else if (isStrongTrend) {
+                  stateTitle = '斜率压制·ADX强';
+                  stateColor = '#E3B341';
+                  stateDesc = '斜率压制但ADX强，短期有反弹，中长期仍承压';
+                } else {
+                  stateTitle = '斜率压制';
+                  stateColor = '#E3B341';
+                  stateDesc = '中长期趋势承压，不轻易抄底，等待趋势企稳';
+                }
+              }
+              // ===== 第四层：ADX趋势反转（顶背离修正）=====
+              else if (hasPVTTopDivergence && adxFalling) {
                 marketState = 'overbought';
-                stateTitle = trendStrength === 'strong_bull' ? '极端超买·强趋势' : '极端超买';
-                stateColor = '#D2A8FF';
-                stateDesc = trendStrength === 'strong_bull' 
-                  ? `股价极高(${extremeOverboughtThreshold}%阈值)，但趋势强劲，密切关注趋势变化`
-                  : '股价处于历史极端高位，建议减仓或观望';
-              } else if (isPriceOverbought) {
-                // 高位超买状态（价格）- 动态阈值
+                stateTitle = '顶背离·ADX回落';
+                stateColor = '#FF3435';
+                stateDesc = 'PVT顶背离+ADX回落，趋势转弱，警惕回调，建议减仓';
+              } else if (hasPVTTopDivergence && isStrongTrend) {
                 marketState = 'overbought';
-                stateTitle = trendStrength === 'strong_bull' ? '高位超买·强趋势' : '高位超买';
+                stateTitle = '顶背离·ADX强';
                 stateColor = '#E3B341';
-                stateDesc = trendStrength === 'strong_bull' || trendStrength === 'bull'
-                  ? `股价偏高(${overboughtThreshold}%阈值)，趋势支撑中，暂不强制减仓`
-                  : '股价相对历史持仓成本偏高，谨慎追高';
-              } else if (isPriceHighFixed && (trendStrength === 'strong_bull' || trendStrength === 'bull')) {
-                // 高位钝化状态：>80%分位但未达动态阈值，趋势强劲
+                stateDesc = 'PVT顶背离但ADX仍强，趋势可能延续，密切关注';
+              } else if (hasPVTTopDivergence) {
                 marketState = 'overbought';
-                stateTitle = '高位钝化·强趋势';
+                stateTitle = '顶背离·ADX弱';
                 stateColor = '#E3B341';
-                stateDesc = `股价处于历史高位(${bias225Pct?.toFixed(0)}%分位)，趋势支撑中，追高谨慎，等待回调`;
-              } else if (isPriceHighFixed) {
-                // 高位状态（非强趋势）
-                marketState = 'overbought';
-                stateTitle = '高位超买';
-                stateColor = '#E3B341';
-                stateDesc = '股价处于历史高位，谨慎追高';
-              } else if (trendStrength === 'strong_bull') {
-                // 强多头趋势状态
+                stateDesc = 'PVT顶背离+ADX弱，趋势不明，谨慎观望';
+              }
+              // ===== 第五层：ADX趋势状态（核心趋势）=====
+              else if (isStrongTrend && adxRising) {
                 marketState = 'normal';
-                stateTitle = '强多头趋势';
+                stateTitle = 'ADX强趋势·上升';
                 stateColor = '#03B172';
-                stateDesc = '趋势强劲，可持股待涨，关注回调买入机会';
-              } else if (trendStrength === 'bull') {
-                // 多头趋势状态
+                stateDesc = 'ADX强且上升，趋势强劲，可持股待涨';
+              } else if (isStrongTrend) {
                 marketState = 'normal';
-                stateTitle = '多头趋势';
+                stateTitle = 'ADX强趋势';
+                stateColor = '#03B172';
+                stateDesc = 'ADX强趋势，可持股待涨，关注回调买入';
+              } else if (isMediumTrend && adxRising) {
+                marketState = 'normal';
+                stateTitle = 'ADX多头·上升';
                 stateColor = '#58A6FF';
-                stateDesc = '趋势向上，可积极操作';
-              } else {
-                // 正常状态
+                stateDesc = 'ADX中等且上升，趋势转强，可积极操作';
+              } else if (isMediumTrend && adxFalling) {
                 marketState = 'normal';
-                stateTitle = '正常状态';
+                stateTitle = 'ADX多头·回落';
+                stateColor = '#E3B341';
+                stateDesc = 'ADX中等但回落，趋势减弱，谨慎追高';
+              } else if (isMediumTrend) {
+                marketState = 'normal';
+                stateTitle = 'ADX多头';
+                stateColor = '#58A6FF';
+                stateDesc = 'ADX中等趋势，可积极操作';
+              }
+              // ===== 第六层：底背离机会（领先指标）=====
+              else if (hasPVTBottomDivergence && adxRising) {
+                marketState = 'normal';
+                stateTitle = '底背离·ADX上升';
                 stateColor = '#03B172';
-                stateDesc = '可综合评估机会与风险信号';
+                stateDesc = 'PVT底背离+ADX上升，反弹动能增强，可左侧试探';
+              } else if (hasPVTBottomDivergence) {
+                marketState = 'normal';
+                stateTitle = '底背离·观察';
+                stateColor = '#58A6FF';
+                stateDesc = 'PVT底背离，关注反弹机会';
+              }
+              // ===== 第七层：一般位置指标（80-90%，权重最低）=====
+              else if (isPriceExtremeOverbought) {
+                marketState = 'overbought';
+                if (isStrongTrend) {
+                  stateTitle = '超买·ADX强';
+                  stateColor = '#D2A8FF';
+                  stateDesc = `股价较高(${extremeOverboughtThreshold}%)，ADX强支撑，暂观望`;
+                } else {
+                  stateTitle = '超买';
+                  stateColor = '#E3B341';
+                  stateDesc = '股价较高，建议减仓';
+                }
+              } else if (isPriceOverbought) {
+                marketState = 'overbought';
+                if (isStrongTrend) {
+                  stateTitle = '偏高·ADX强';
+                  stateColor = '#E3B341';
+                  stateDesc = `股价偏高(${overboughtThreshold}%)，ADX强支撑，暂不强制减仓`;
+                } else {
+                  stateTitle = '偏高';
+                  stateColor = '#E3B341';
+                  stateDesc = '股价偏高，谨慎追高';
+                }
+              } else if (isPriceHighFixed) {
+                marketState = 'overbought';
+                if (isStrongTrend) {
+                  stateTitle = '高位·ADX强';
+                  stateColor = '#58A6FF';
+                  stateDesc = `股价高位(${bias225Pct?.toFixed(0)}%)，ADX支撑，追高谨慎`;
+                } else {
+                  stateTitle = '高位';
+                  stateColor = '#E3B341';
+                  stateDesc = '股价高位，建议减仓';
+                }
+              }
+              // ===== 第七层：震荡/弱趋势（ADX<20）=====
+              else {
+                marketState = 'normal';
+                stateTitle = '震荡整理';
+                stateColor = '#8B949E';
+                stateDesc = 'ADX弱趋势，震荡行情，区间操作或观望';
               }
               
               // 根据状态调整信号显示
@@ -770,96 +914,189 @@ function App() {
                             </div>
                           </div>
                           
-                          {/* 趋势强度 & 斜率 - 详细显示 */}
+                          {/* 趋势强度综合面板 - ADX + PVT + 斜率 */}
                           <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
-                            <div className="flex items-center justify-between text-[10px] mb-1">
-                              <span className="text-[#8B949E]">趋势强度</span>
-                              <span className={
-                                lastIndicator?.trendStrength === 'strong_bull' ? 'text-[#03B172]' :
-                                lastIndicator?.trendStrength === 'bull' ? 'text-[#58A6FF]' :
-                                lastIndicator?.trendStrength === 'bear' ? 'text-[#E3B341]' :
-                                lastIndicator?.trendStrength === 'strong_bear' ? 'text-[#FF3435]' :
-                                'text-[#8B949E]'
-                              }>
-                                {lastIndicator?.trendStrength === 'strong_bull' ? '强多头' :
-                                 lastIndicator?.trendStrength === 'bull' ? '多头' :
-                                 lastIndicator?.trendStrength === 'bear' ? '空头' :
-                                 lastIndicator?.trendStrength === 'strong_bear' ? '强空头' :
-                                 '震荡'}
-                                ({lastIndicator?.trendScore?.toFixed(0) ?? '-'}分)
+                            {/* 标题行 + 整体结论 */}
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10px] font-medium text-[#8B949E]">趋势强度综合</span>
+                              <span className="text-[10px] font-medium">
+                                {(() => {
+                                  const adx = lastIndicator?.adx || 0;
+                                  const adxState = lastIndicator?.adxState;
+                                  const pvtDiv = lastIndicator?.pvtDivergence;
+                                  const slopeLevel = lastIndicator?.slopeLevel || 0;
+                                  const bias225 = lastIndicator?.bias225 ?? 0;
+                                  
+                                  // 基础趋势判断（基于ADX绝对值）
+                                  let baseTrend = '';
+                                  if (adx >= 40) baseTrend = 'strong';
+                                  else if (adx >= 20) baseTrend = 'medium';
+                                  else baseTrend = 'weak';
+                                  
+                                  // 价格相对于长期均线的位置
+                                  const isPriceAboveMA225 = bias225 > 0; // 价格在225均线之上
+                                  const isPriceBelowMA225 = bias225 < -5; // 价格明显低于225均线（>5%）
+                                  
+                                  // 风险因子（包括弱压力）
+                                  const hasTopDivergence = pvtDiv === 'top';
+                                  const hasSlopePressureStrong = slopeLevel >= 2;
+                                  const hasSlopePressureWeak = slopeLevel >= 1; // 包含弱压力
+                                  const adxWeakening = adxState === 'falling';
+                                  const adxRising = adxState === 'rising';
+                                  const hasBottomDivergence = pvtDiv === 'bottom';
+                                  
+                                  // ===== 强趋势判断 =====
+                                  // 强多头：ADX强 + 无顶背离 + 无斜率压力 + 价格在225均线之上
+                                  if (baseTrend === 'strong' && !hasTopDivergence && !hasSlopePressureWeak && isPriceAboveMA225) {
+                                    return <span className="text-[#03B172]">🔥 强多头</span>;
+                                  }
+                                  // 强空头：ADX强 + 价格明显低于225均线
+                                  if (baseTrend === 'strong' && isPriceBelowMA225) {
+                                    return <span className="text-[#FF3435]">🔥 强空头</span>;
+                                  }
+                                  // 强多头但斜率弱压：ADX强但斜率有弱压力
+                                  if (baseTrend === 'strong' && !hasTopDivergence && hasSlopePressureWeak && isPriceAboveMA225) {
+                                    return <span className="text-[#58A6FF]">强多头·斜率弱压</span>;
+                                  }
+                                  
+                                  // ===== 中等趋势判断 =====
+                                  // ADX中等+上升+无压力+价格在均线之上：多头形成中
+                                  if (baseTrend === 'medium' && adxRising && !hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
+                                    return <span className="text-[#58A6FF]">📈 多头形成</span>;
+                                  }
+                                  // ADX中等+价格明显低于225均线：空头形成中
+                                  if (baseTrend === 'medium' && isPriceBelowMA225) {
+                                    return <span className="text-[#FF3435]">📉 空头形成</span>;
+                                  }
+                                  // ADX中等+弱压力+价格在均线上：多头承压
+                                  if (baseTrend === 'medium' && hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
+                                    return <span className="text-[#E3B341]">多头·斜率弱压</span>;
+                                  }
+                                  // ADX中等+走平+价格在均线上：多头震荡
+                                  if (baseTrend === 'medium' && !hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
+                                    return <span className="text-[#E3B341]">📊 多头震荡</span>;
+                                  }
+                                  // ADX中等+价格在均线附近：趋势不明
+                                  if (baseTrend === 'medium' && !isPriceAboveMA225 && !isPriceBelowMA225) {
+                                    return <span className="text-[#8B949E]">趋势不明</span>;
+                                  }
+                                  
+                                  // ===== 顶背离风险（只在价格偏高时显示） =====
+                                  if (baseTrend === 'strong' && hasTopDivergence && isPriceAboveMA225) {
+                                    return <span className="text-[#E3B341]">⚠️ 强转弱风险</span>;
+                                  }
+                                  if (baseTrend === 'medium' && hasTopDivergence && isPriceAboveMA225) {
+                                    return <span className="text-[#FF3435]">⚠️ 顶背离风险</span>;
+                                  }
+                                  if (hasTopDivergence && adxWeakening && isPriceAboveMA225) {
+                                    return <span className="text-[#FF3435]">🚨 趋势反转</span>;
+                                  }
+                                  
+                                  // ===== 底背离机会（只在价格偏低时显示） =====
+                                  if (hasBottomDivergence && adxRising && isPriceBelowMA225) {
+                                    return <span className="text-[#03B172]">✅ 底背离机会</span>;
+                                  }
+                                  if (hasBottomDivergence && baseTrend !== 'weak' && isPriceBelowMA225) {
+                                    return <span className="text-[#58A6FF]">📊 底背离观察</span>;
+                                  }
+                                  
+                                  // ===== 斜率压制（多头时）/支撑（空头时） =====
+                                  if (hasSlopePressureStrong && isPriceAboveMA225) {
+                                    return <span className="text-[#E3B341]">📉 斜率压制</span>;
+                                  }
+                                  
+                                  // ===== ADX走弱 =====
+                                  if (adxWeakening && baseTrend === 'medium' && isPriceAboveMA225) {
+                                    return <span className="text-[#E3B341]">📉 趋势减弱</span>;
+                                  }
+                                  if (adxWeakening && baseTrend === 'medium' && isPriceBelowMA225) {
+                                    return <span className="text-[#8B949E]">📉 空头减弱</span>;
+                                  }
+                                  
+                                  // ===== 弱趋势 =====
+                                  if (baseTrend === 'weak' && isPriceAboveMA225) {
+                                    return <span className="text-[#8B949E]">💤 多头整理</span>;
+                                  }
+                                  if (baseTrend === 'weak' && isPriceBelowMA225) {
+                                    return <span className="text-[#8B949E]">💤 空头整理</span>;
+                                  }
+                                  if (baseTrend === 'weak') {
+                                    return <span className="text-[#8B949E]">💤 震荡整理</span>;
+                                  }
+                                  
+                                  return <span className="text-[#8B949E]">⚪ 观望</span>;
+                                })()}
                               </span>
                             </div>
-                            <div className="flex items-center justify-between text-[10px] mb-1">
-                              <span className="text-[#8B949E]">斜率压力</span>
-                              <span className={
-                                (lastIndicator?.slopeLevel || 0) >= 3 ? 'text-[#FF3435]' : 
-                                (lastIndicator?.slopeLevel || 0) >= 2 ? 'text-[#E3B341]' : 
-                                (lastIndicator?.slopeLevel || 0) >= 1 ? 'text-[#D2A8FF]' :
-                                'text-[#03B172]'
-                              }>
-                                {lastIndicator?.slopePressure?.toFixed(0) ?? '-'}
-                              </span>
+                            
+                            {/* ADX 和 PVT 和 斜率压力 - 放在斜率详细数据上面 */}
+                            <div className="space-y-1.5 mb-2">
+                              {/* ADX 平均趋向指数 */}
+                              <div className="flex items-center justify-between text-[9px]">
+                                <span className="text-[#8B949E]">ADX趋向(14日):</span>
+                                <span className={
+                                  (lastIndicator?.adx || 0) >= 40 ? 'text-[#03B172]' : 
+                                  (lastIndicator?.adx || 0) >= 20 ? 'text-[#E3B341]' : 
+                                  'text-[#8B949E]'
+                                }>
+                                  {lastIndicator?.adx?.toFixed(0) ?? '-'} · 
+                                  {(lastIndicator?.adx || 0) >= 40 ? '强' : 
+                                   (lastIndicator?.adx || 0) >= 20 ? '中等' : '弱'}
+                                  {(lastIndicator?.adxState === 'rising') ? '↗' : 
+                                   (lastIndicator?.adxState === 'falling') ? '↘' : '→'}
+                                </span>
+                              </div>
+                              {/* PVT 价量趋势背离 */}
+                              <div className="flex items-center justify-between text-[9px]">
+                                <span className="text-[#8B949E]">PVT量价(20日):</span>
+                                {lastIndicator?.pvtDivergence === 'top' ? (
+                                  <span className="text-[#FF3435]">⚠️ 顶背离</span>
+                                ) : lastIndicator?.pvtDivergence === 'bottom' ? (
+                                  // 底背离在高位时显示警告（回调信号，非买入信号）
+                                  (lastIndicator?.bias225 !== null && lastIndicator!.bias225! > 10) ? (
+                                    <span className="text-[#E3B341]">⚠️ 高位回调</span>
+                                  ) : (
+                                    <span className="text-[#03B172]">✅ 底背离</span>
+                                  )
+                                ) : (
+                                  <span className="text-[#8B949E]">无背离</span>
+                                )}
+                              </div>
+                              {/* 斜率压力判断 */}
+                              <div className="flex items-center justify-between text-[9px]">
+                                <span className="text-[#8B949E]">斜率压力:</span>
+                                <span className={
+                                  (lastIndicator?.slopeLevel || 0) >= 3 ? 'text-[#FF3435]' : 
+                                  (lastIndicator?.slopeLevel || 0) >= 2 ? 'text-[#E3B341]' : 
+                                  (lastIndicator?.slopeLevel || 0) >= 1 ? 'text-[#D2A8FF]' :
+                                  'text-[#03B172]'
+                                }>
+                                  {lastIndicator?.slopePressure?.toFixed(0) ?? '-'}分 · 
+                                  {(lastIndicator?.slopeLevel || 0) >= 3 ? '强' : 
+                                   (lastIndicator?.slopeLevel || 0) >= 2 ? '中' : 
+                                   (lastIndicator?.slopeLevel || 0) >= 1 ? '弱' : '无'}
+                                </span>
+                              </div>
                             </div>
-                            <div className="text-[9px] text-[#8B949E] pt-1 border-t border-[#30363D] space-y-0.5">
+                            
+                            {/* 斜率详细信息 */}
+                            <div className="text-[9px] text-[#8B949E] pt-2 border-t border-[#30363D] space-y-0.5">
                               <div className="flex justify-between">
-                                <span>MA20:</span>
+                                <span>MA20斜率:</span>
                                 <span className={lastIndicator?.slope20 && lastIndicator.slope20 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
                                   {lastIndicator?.slope20?.toFixed(2) ?? '-'}%
                                 </span>
                               </div>
                               <div className="flex justify-between">
-                                <span>MA60:</span>
+                                <span>MA60斜率:</span>
                                 <span className={lastIndicator?.slope60 && lastIndicator.slope60 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
                                   {lastIndicator?.slope60?.toFixed(2) ?? '-'}%
                                 </span>
                               </div>
                               <div className="flex justify-between">
-                                <span>MA225:</span>
+                                <span>MA225斜率:</span>
                                 <span className={lastIndicator?.slope225 && lastIndicator.slope225 < 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}>
                                   {lastIndicator?.slope225?.toFixed(2) ?? '-'}%
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* ADX & PVT - 趋势强度与量价背离 */}
-                          <div className="p-2 bg-[#161B22] rounded-lg border border-[#30363D]">
-                            <div className="flex items-center justify-between text-[10px] mb-1">
-                              <span className="text-[#8B949E]">ADX趋势强度</span>
-                              <span className={
-                                (lastIndicator?.adx || 0) >= 40 ? 'text-[#03B172]' : 
-                                (lastIndicator?.adx || 0) >= 20 ? 'text-[#E3B341]' : 
-                                'text-[#8B949E]'
-                              }>
-                                {lastIndicator?.adx?.toFixed(0) ?? '-'}
-                                {(lastIndicator?.adxState === 'rising' && (lastIndicator?.adx || 0) >= 40) ? '↑' : 
-                                 (lastIndicator?.adxState === 'falling' && (lastIndicator?.adx || 0) >= 40) ? '↓' :
-                                 lastIndicator?.adxState === 'rising' ? '↗' :
-                                 lastIndicator?.adxState === 'falling' ? '↘' : ''}
-                              </span>
-                            </div>
-                            <div className="text-[9px] text-[#8B949E] pt-1 border-t border-[#30363D] space-y-0.5">
-                              <div className="flex justify-between">
-                                <span>趋势:</span>
-                                <span className={
-                                  (lastIndicator?.adx || 0) >= 40 ? 'text-[#03B172]' : 
-                                  (lastIndicator?.adx || 0) >= 20 ? 'text-[#E3B341]' : 
-                                  'text-[#FF3435]'
-                                }>
-                                  {(lastIndicator?.adx || 0) >= 40 ? '强' : 
-                                   (lastIndicator?.adx || 0) >= 20 ? '中等' : '弱(震荡)'}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>PVT:</span>
-                                <span className={
-                                  lastIndicator?.pvtDivergence === 'top' ? 'text-[#FF3435]' :
-                                  lastIndicator?.pvtDivergence === 'bottom' ? 'text-[#03B172]' :
-                                  'text-[#8B949E]'
-                                }>
-                                  {lastIndicator?.pvt?.toFixed(0) ?? '-'}
-                                  {lastIndicator?.pvtDivergence === 'top' ? '⚠️顶背离' :
-                                   lastIndicator?.pvtDivergence === 'bottom' ? '底背离' : ''}
                                 </span>
                               </div>
                             </div>

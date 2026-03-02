@@ -1126,11 +1126,35 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     }
   }
   
+  // 15b. 计算贪婪指数历史分位数（使用全部可用历史数据）
+  const greedyPercentile: (number | null)[] = new Array(stockData.length).fill(null);
+  const firstValidGreedy = greedyResult.greedy.findIndex(v => v !== null);
+  if (firstValidGreedy >= 0) {
+    for (let i = firstValidGreedy + 30; i < stockData.length; i++) {
+      const currentGreedy = greedyResult.greedy[i];
+      if (currentGreedy === null) {
+        greedyPercentile[i] = null;
+        continue;
+      }
+      // 收集从开始到当前的所有历史数据
+      const history = greedyResult.greedy.slice(firstValidGreedy, i).filter((v): v is number => v !== null);
+      if (history.length >= 30) {
+        const sorted = [...history].sort((a, b) => a - b);
+        const lessThan = sorted.filter(v => v < currentGreedy).length;
+        const equalTo = sorted.filter(v => v === currentGreedy).length;
+        const rank = lessThan + equalTo / 2;
+        greedyPercentile[i] = (rank / history.length) * 100;
+      } else {
+        greedyPercentile[i] = 50;
+      }
+    }
+  }
+  
   // 16. 计算ADX（平均趋向指数）- 14日周期
   const { adx, plusDI, minusDI, adxState } = calculateADX(stockData, 14);
   
   // 17. 计算PVT（价量趋势指标）
-  const { pvt, pvtDivergence, pvtTrend } = calculatePVT(stockData);
+  const { pvt, pvtDivergence, pvtTrend } = calculatePVT(stockData, bias225, costDiff, 20);
   
   return stockData.map((d, i) => ({
     date: d.date,
@@ -1155,6 +1179,7 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     vr: criResult.vr[i],
     // 贪婪指标
     greedy: greedyResult.greedy[i],
+    greedyPercentile: greedyPercentile[i],
     greedyComponents: greedyResult.components.posBasis[i] !== null ? {
       posBasis: greedyResult.components.posBasis[i]!,
       upGap: greedyResult.components.upGap[i]!,
@@ -1335,12 +1360,22 @@ function wilderSmooth(data: number[], period: number): number[] {
 }
 
 /**
- * 计算PVT（价量趋势指标）
+ * 计算PVT（价量趋势指标）- 通达信公式
+ * SUM(VOL * (CLOSE-REF(CLOSE,1))/REF(CLOSE,1), 0)
+ * 背离判断增加价格位置过滤：
+ * - 顶背离只在价格偏高时显示（BIAS>10%）
+ * - 底背离只在成本偏离低位时显示（成本偏离<0，即价格低于成本）
  * @param stockData K线数据
+ * @param bias225 BIAS225数组
+ * @param costDiff 成本差数组
+ * @param lookback 背离检测窗口，默认20天
  * @returns PVT值、背离信号、PVT趋势
  */
 function calculatePVT(
-  stockData: StockData[]
+  stockData: StockData[],
+  bias225: (number | null)[],
+  costDiff: (number | null)[],
+  lookback: number = 20
 ): {
   pvt: (number | null)[];
   pvtDivergence: ('none' | 'top' | 'bottom' | null)[];
@@ -1353,14 +1388,14 @@ function calculatePVT(
   
   if (n < 2) return { pvt, pvtDivergence, pvtTrend };
   
-  // 计算PVT累积值
+  // 计算PVT累积值 - 从第一天开始累积
   pvt[0] = 0;
   for (let i = 1; i < n; i++) {
     const priceChange = (stockData[i].close - stockData[i - 1].close) / stockData[i - 1].close;
     pvt[i] = (pvt[i - 1] || 0) + stockData[i].volume * priceChange;
   }
   
-  // 计算PVT趋势（与5天前比较）
+  // 计算PVT趋势（与5天前比较）- 短期趋势
   for (let i = 5; i < n; i++) {
     const diff = (pvt[i] || 0) - (pvt[i - 5] || 0);
     if (diff > 0) {
@@ -1372,31 +1407,51 @@ function calculatePVT(
     }
   }
   
-  // 检测背离（使用20天窗口找极值）
-  const window = 20;
-  for (let i = window; i < n; i++) {
-    const priceWindow = stockData.slice(i - window, i + 1).map(d => d.close);
-    const pvtWindow = pvt.slice(i - window, i + 1).filter((v): v is number => v !== null);
+  // 检测背离 - 使用 lookback 天窗口
+  for (let i = lookback; i < n; i++) {
+    // 取最近 lookback 日的数据
+    const recentPrice = stockData.slice(i - lookback, i + 1).map(d => d.close);
+    const recentPVT = pvt.slice(i - lookback, i + 1).filter((v): v is number => v !== null);
     
-    if (pvtWindow.length < window) continue;
+    if (recentPVT.length < lookback) continue;
+    
+    // 找到价格和PVT的最高/最低点位置
+    const priceHighIdx = recentPrice.indexOf(Math.max(...recentPrice));
+    const pvtHighIdx = recentPVT.indexOf(Math.max(...recentPVT));
+    const priceLowIdx = recentPrice.indexOf(Math.min(...recentPrice));
+    const pvtLowIdx = recentPVT.indexOf(Math.min(...recentPVT));
     
     const currentPrice = stockData[i].close;
     const currentPVT = pvt[i] || 0;
+    const price5DaysAgo = stockData[i - 5]?.close || currentPrice;
     
-    const maxPrice = Math.max(...priceWindow);
-    const minPrice = Math.min(...priceWindow);
-    const maxPVT = Math.max(...pvtWindow);
-    const minPVT = Math.min(...pvtWindow);
+    // 获取当前指标判断价格位置
+    const currentBias = bias225[i];
+    const currentCostDiff = costDiff[i];
+    const isPriceHigh = currentBias !== null && currentBias > 10; // BIAS>10%视为偏高（顶背离用）
+    const isCostDiffLow = currentCostDiff !== null && currentCostDiff < 0; // 成本差<0视为低位（底背离用）
     
-    // 顶背离：价格新高，PVT未新高
-    if (currentPrice >= maxPrice * 0.99 && currentPVT < maxPVT * 0.95) {
+    // PVT背离基础判断（修复负数比较）
+    const isPriceHigher = currentPrice > price5DaysAgo * 1.01;
+    const isPriceLower = currentPrice < price5DaysAgo * 0.99;
+    const priceHighLater = priceHighIdx >= pvtHighIdx;
+    const priceLowLater = priceLowIdx >= pvtLowIdx;
+    
+    const pvtHighValue = recentPVT[pvtHighIdx];
+    const pvtLowValue = recentPVT[pvtLowIdx];
+    const pvtGapRatioTop = (pvtHighValue - currentPVT) / (Math.abs(pvtHighValue) + 1e-10);
+    const pvtGapRatioBottom = (currentPVT - pvtLowValue) / (Math.abs(pvtLowValue) + 1e-10);
+    const isPVTNotHigher = pvtGapRatioTop > 0.02;
+    const isPVTNotLower = pvtGapRatioBottom > 0.02;
+    
+    // ===== 顶背离判断（只在价格偏高时显示，用BIAS>10%）=====
+    if (isPriceHigh && priceHighLater && isPriceHigher && isPVTNotHigher) {
       pvtDivergence[i] = 'top';
     }
-    // 底背离：价格新低，PVT未新低
-    else if (currentPrice <= minPrice * 1.01 && currentPVT > minPVT * 1.05) {
+    // ===== 底背离判断（只在成本偏离低位时显示，用成本差<0）=====
+    else if (isCostDiffLow && priceLowLater && isPriceLower && isPVTNotLower) {
       pvtDivergence[i] = 'bottom';
-    }
-    else {
+    } else {
       pvtDivergence[i] = 'none';
     }
   }

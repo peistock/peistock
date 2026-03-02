@@ -32,6 +32,7 @@ export interface IndicatorData {
   vr: number | null; // 成交量比率 VR = VOL / MA(VOL,20)
   // 贪婪情绪指标 (Greed Sentiment Indicator)
   greedy: number | null;       // 贪婪总分 (0-100)
+  greedyPercentile: number | null; // 贪婪指数历史分位数
   greedyComponents: {          // 贪婪成分分解
     posBasis: number;     // 正向成本偏离（价格泡沫）
     upGap: number;        // 向上跳空强度
