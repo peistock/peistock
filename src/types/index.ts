@@ -67,6 +67,15 @@ export interface IndicatorData {
   // 趋势强度
   trendStrength: 'strong_bull' | 'bull' | 'neutral' | 'bear' | 'strong_bear' | null;
   trendScore: number | null; // 趋势得分 -100~+100
+  // ADX趋势强度
+  adx: number | null; // ADX值 0-100
+  adxState: 'rising' | 'falling' | 'flat' | null; // ADX趋势状态
+  plusDI: number | null; // +DI值
+  minusDI: number | null; // -DI值
+  // PVT价量趋势
+  pvt: number | null; // PVT累积值
+  pvtDivergence: 'none' | 'top' | 'bottom' | null; // 背离信号
+  pvtTrend: 'rising' | 'falling' | 'flat' | null; // PVT趋势
 }
 
 export interface StockInfo {

@@ -1126,6 +1126,12 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     }
   }
   
+  // 16. 计算ADX（平均趋向指数）- 14日周期
+  const { adx, plusDI, minusDI, adxState } = calculateADX(stockData, 14);
+  
+  // 17. 计算PVT（价量趋势指标）
+  const { pvt, pvtDivergence, pvtTrend } = calculatePVT(stockData);
+  
   return stockData.map((d, i) => ({
     date: d.date,
     close: d.close,
@@ -1184,7 +1190,218 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     // 趋势强度
     trendStrength: trendStrength[i],
     trendScore: trendScore[i],
+    // ADX趋势强度
+    adx: adx[i],
+    adxState: adxState[i],
+    plusDI: plusDI[i],
+    minusDI: minusDI[i],
+    // PVT价量趋势
+    pvt: pvt[i],
+    pvtDivergence: pvtDivergence[i],
+    pvtTrend: pvtTrend[i],
   }));
+}
+
+/**
+ * 计算ADX（平均趋向指数）
+ * @param stockData K线数据
+ * @param period 周期（默认14）
+ * @returns ADX, +DI, -DI, ADX状态
+ */
+function calculateADX(
+  stockData: StockData[],
+  period: number = 14
+): {
+  adx: (number | null)[];
+  plusDI: (number | null)[];
+  minusDI: (number | null)[];
+  adxState: ('rising' | 'falling' | 'flat' | null)[];
+} {
+  const n = stockData.length;
+  const adx: (number | null)[] = new Array(n).fill(null);
+  const plusDI: (number | null)[] = new Array(n).fill(null);
+  const minusDI: (number | null)[] = new Array(n).fill(null);
+  const adxState: ('rising' | 'falling' | 'flat' | null)[] = new Array(n).fill(null);
+  
+  if (n < period + 1) return { adx, plusDI, minusDI, adxState };
+  
+  // 计算+DM, -DM, TR
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const tr: number[] = [];
+  
+  for (let i = 1; i < n; i++) {
+    const current = stockData[i];
+    const prev = stockData[i - 1];
+    
+    const upMove = current.high - prev.high;
+    const downMove = prev.low - current.low;
+    
+    if (upMove > downMove && upMove > 0) {
+      plusDM.push(upMove);
+    } else {
+      plusDM.push(0);
+    }
+    
+    if (downMove > upMove && downMove > 0) {
+      minusDM.push(downMove);
+    } else {
+      minusDM.push(0);
+    }
+    
+    // TR = max(high-low, |high-prevClose|, |low-prevClose|)
+    const tr1 = current.high - current.low;
+    const tr2 = Math.abs(current.high - prev.close);
+    const tr3 = Math.abs(current.low - prev.close);
+    tr.push(Math.max(tr1, tr2, tr3));
+  }
+  
+  // 使用Wilder平滑计算
+  const smoothPlusDM = wilderSmooth(plusDM, period);
+  const smoothMinusDM = wilderSmooth(minusDM, period);
+  const smoothTR = wilderSmooth(tr, period);
+  
+  // 计算+DI和-DI
+  for (let i = period; i < n; i++) {
+    const idx = i - period;
+    if (smoothTR[idx] > 0) {
+      plusDI[i] = 100 * smoothPlusDM[idx] / smoothTR[idx];
+      minusDI[i] = 100 * smoothMinusDM[idx] / smoothTR[idx];
+      
+      // 计算DX
+      const currentPlusDI = plusDI[i];
+      const currentMinusDI = minusDI[i];
+      if (currentPlusDI === null || currentMinusDI === null) continue;
+      
+      const diDiff = Math.abs(currentPlusDI - currentMinusDI);
+      const diSum = currentPlusDI + currentMinusDI;
+      if (diSum > 0) {
+        const dx = 100 * diDiff / diSum;
+        
+        // 计算ADX（DX的Wilder平滑）
+        if (i === period) {
+          adx[i] = dx;
+        } else {
+          const prevADX = adx[i - 1] ?? dx;
+          adx[i] = (prevADX * (period - 1) + dx) / period;
+        }
+        
+        // 判断ADX状态（与3天前比较）
+        if (i >= period + 3) {
+          const currentADX = adx[i];
+          const adx3DaysAgoVal = adx[i - 3];
+          if (currentADX !== null && adx3DaysAgoVal !== null) {
+            const diff = currentADX - adx3DaysAgoVal;
+            if (diff > 1) {
+              adxState[i] = 'rising';
+            } else if (diff < -1) {
+              adxState[i] = 'falling';
+            } else {
+              adxState[i] = 'flat';
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return { adx, plusDI, minusDI, adxState };
+}
+
+/**
+ * Wilder平滑法
+ * @param data 数据数组
+ * @param period 周期
+ * @returns 平滑后的数组
+ */
+function wilderSmooth(data: number[], period: number): number[] {
+  const result: number[] = [];
+  if (data.length < period) return result;
+  
+  // 第一个值是简单平均
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += data[i];
+  }
+  result.push(sum / period);
+  
+  // 后续使用Wilder公式：EMA = (prevEMA * (n-1) + current) / n
+  for (let i = period; i < data.length; i++) {
+    const prevEMA = result[result.length - 1];
+    result.push((prevEMA * (period - 1) + data[i]) / period);
+  }
+  
+  return result;
+}
+
+/**
+ * 计算PVT（价量趋势指标）
+ * @param stockData K线数据
+ * @returns PVT值、背离信号、PVT趋势
+ */
+function calculatePVT(
+  stockData: StockData[]
+): {
+  pvt: (number | null)[];
+  pvtDivergence: ('none' | 'top' | 'bottom' | null)[];
+  pvtTrend: ('rising' | 'falling' | 'flat' | null)[];
+} {
+  const n = stockData.length;
+  const pvt: (number | null)[] = new Array(n).fill(null);
+  const pvtDivergence: ('none' | 'top' | 'bottom' | null)[] = new Array(n).fill(null);
+  const pvtTrend: ('rising' | 'falling' | 'flat' | null)[] = new Array(n).fill(null);
+  
+  if (n < 2) return { pvt, pvtDivergence, pvtTrend };
+  
+  // 计算PVT累积值
+  pvt[0] = 0;
+  for (let i = 1; i < n; i++) {
+    const priceChange = (stockData[i].close - stockData[i - 1].close) / stockData[i - 1].close;
+    pvt[i] = (pvt[i - 1] || 0) + stockData[i].volume * priceChange;
+  }
+  
+  // 计算PVT趋势（与5天前比较）
+  for (let i = 5; i < n; i++) {
+    const diff = (pvt[i] || 0) - (pvt[i - 5] || 0);
+    if (diff > 0) {
+      pvtTrend[i] = 'rising';
+    } else if (diff < 0) {
+      pvtTrend[i] = 'falling';
+    } else {
+      pvtTrend[i] = 'flat';
+    }
+  }
+  
+  // 检测背离（使用20天窗口找极值）
+  const window = 20;
+  for (let i = window; i < n; i++) {
+    const priceWindow = stockData.slice(i - window, i + 1).map(d => d.close);
+    const pvtWindow = pvt.slice(i - window, i + 1).filter((v): v is number => v !== null);
+    
+    if (pvtWindow.length < window) continue;
+    
+    const currentPrice = stockData[i].close;
+    const currentPVT = pvt[i] || 0;
+    
+    const maxPrice = Math.max(...priceWindow);
+    const minPrice = Math.min(...priceWindow);
+    const maxPVT = Math.max(...pvtWindow);
+    const minPVT = Math.min(...pvtWindow);
+    
+    // 顶背离：价格新高，PVT未新高
+    if (currentPrice >= maxPrice * 0.99 && currentPVT < maxPVT * 0.95) {
+      pvtDivergence[i] = 'top';
+    }
+    // 底背离：价格新低，PVT未新低
+    else if (currentPrice <= minPrice * 1.01 && currentPVT > minPVT * 1.05) {
+      pvtDivergence[i] = 'bottom';
+    }
+    else {
+      pvtDivergence[i] = 'none';
+    }
+  }
+  
+  return { pvt, pvtDivergence, pvtTrend };
 }
 
 /**
