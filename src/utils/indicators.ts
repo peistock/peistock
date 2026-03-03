@@ -1151,7 +1151,7 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
   }
   
   // 16. 计算ADX（平均趋向指数）- 14日周期
-  const { adx, plusDI, minusDI, adxState } = calculateADX(stockData, 14);
+  const { adx, plusDI, minusDI, adxState, adxExhaustion } = calculateADX(stockData, 14);
   
   // 17. 计算PVT（价量趋势指标）
   const { pvt, pvtDivergence, pvtTrend } = calculatePVT(stockData, bias225, costDiff, 20);
@@ -1218,6 +1218,7 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
     // ADX趋势强度
     adx: adx[i],
     adxState: adxState[i],
+    adxExhaustion: adxExhaustion[i],
     plusDI: plusDI[i],
     minusDI: minusDI[i],
     // PVT价量趋势
@@ -1231,7 +1232,7 @@ export function calculateAllIndicators(stockData: StockData[], capital: number):
  * 计算ADX（平均趋向指数）
  * @param stockData K线数据
  * @param period 周期（默认14）
- * @returns ADX, +DI, -DI, ADX状态
+ * @returns ADX, +DI, -DI, ADX状态, ADX衰竭信号
  */
 function calculateADX(
   stockData: StockData[],
@@ -1241,14 +1242,16 @@ function calculateADX(
   plusDI: (number | null)[];
   minusDI: (number | null)[];
   adxState: ('rising' | 'falling' | 'flat' | null)[];
+  adxExhaustion: ('bottom' | 'top' | null)[];
 } {
   const n = stockData.length;
   const adx: (number | null)[] = new Array(n).fill(null);
   const plusDI: (number | null)[] = new Array(n).fill(null);
   const minusDI: (number | null)[] = new Array(n).fill(null);
   const adxState: ('rising' | 'falling' | 'flat' | null)[] = new Array(n).fill(null);
+  const adxExhaustion: ('bottom' | 'top' | null)[] = new Array(n).fill(null);
   
-  if (n < period + 1) return { adx, plusDI, minusDI, adxState };
+  if (n < period + 1) return { adx, plusDI, minusDI, adxState, adxExhaustion };
   
   // 计算+DM, -DM, TR
   const plusDM: number[] = [];
@@ -1330,7 +1333,55 @@ function calculateADX(
     }
   }
   
-  return { adx, plusDI, minusDI, adxState };
+  // 计算ADX衰竭信号 - 使用相对ADX高点检测
+  // 底部衰竭：在下跌趋势中，ADX从局部高点回落，表示恐惧动能衰竭
+  // 顶部衰竭：在上涨趋势中，ADX从局部高点回落，表示贪婪动能衰竭
+  const lookback = 10; // 查找局部ADX高点的回望期
+  
+  for (let i = period + lookback + 3; i < n; i++) {
+    const currentState = adxState[i];
+    const currentADX = adx[i];
+    
+    if (currentState === null || currentADX === null) continue;
+    
+    // 只有当ADX状态为falling或flat时才检查衰竭
+    if (currentState !== 'falling' && currentState !== 'flat') continue;
+    
+    // 查找近期ADX高点（该波段的最高值）
+    let localADXHigh = 0;
+    let localHighIdx = -1;
+    for (let j = i - lookback; j < i; j++) {
+      const adxVal = adx[j];
+      if (adxVal !== null && adxVal > localADXHigh) {
+        localADXHigh = adxVal;
+        localHighIdx = j;
+      }
+    }
+    
+    // 如果当前ADX明显低于局部高点，说明已经回落了一段
+    const hasDeclined = localADXHigh > 0 && currentADX < localADXHigh * 0.9;
+    
+    // 确保在高点时ADX是rising（确认是从上升转为下降）
+    const wasRisingBefore = localHighIdx >= 0 && adxState[localHighIdx] === 'rising';
+    
+    if (hasDeclined && wasRisingBefore) {
+      // 判断是底部还是顶部衰竭
+      const plusDIVal = plusDI[i];
+      const minusDIVal = minusDI[i];
+      
+      if (plusDIVal !== null && minusDIVal !== null) {
+        if (minusDIVal > plusDIVal) {
+          // 下跌趋势中的衰竭 = 底部
+          adxExhaustion[i] = 'bottom';
+        } else if (plusDIVal > minusDIVal) {
+          // 上涨趋势中的衰竭 = 顶部
+          adxExhaustion[i] = 'top';
+        }
+      }
+    }
+  }
+  
+  return { adx, plusDI, minusDI, adxState, adxExhaustion };
 }
 
 /**
@@ -1363,7 +1414,7 @@ function wilderSmooth(data: number[], period: number): number[] {
  * 计算PVT（价量趋势指标）- 通达信公式
  * SUM(VOL * (CLOSE-REF(CLOSE,1))/REF(CLOSE,1), 0)
  * 背离判断增加价格位置过滤：
- * - 顶背离只在价格偏高时显示（BIAS>10%）
+ * - 顶背离只在价格偏高时显示（BIAS>80%）
  * - 底背离只在成本偏离低位时显示（成本偏离<0，即价格低于成本）
  * @param stockData K线数据
  * @param bias225 BIAS225数组
@@ -1428,7 +1479,7 @@ function calculatePVT(
     // 获取当前指标判断价格位置
     const currentBias = bias225[i];
     const currentCostDiff = costDiff[i];
-    const isPriceHigh = currentBias !== null && currentBias > 10; // BIAS>10%视为偏高（顶背离用）
+    const isPriceHigh = currentBias !== null && currentBias > 80; // BIAS>80%视为偏高（顶背离用）
     const isCostDiffLow = currentCostDiff !== null && currentCostDiff < 0; // 成本差<0视为低位（底背离用）
     
     // PVT背离基础判断（修复负数比较）

@@ -28,7 +28,11 @@ export async function getKlines(
   
   const url = `${SINA_KLINE_API}?symbol=${symbol}&scale=${scale}&ma=no&datalen=${limit}`;
   
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      'Referer': 'https://finance.sina.com.cn',
+    },
+  });
   
   if (!response.ok) {
     throw new Error(`获取K线数据失败: ${response.status}`);
@@ -84,7 +88,11 @@ export async function getQuote(symbol: string): Promise<{
 }> {
   const url = `${SINA_QUOTE_API}=${symbol}`;
   
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      'Referer': 'https://finance.sina.com.cn',
+    },
+  });
   
   if (!response.ok) {
     throw new Error(`获取行情失败: ${response.status}`);

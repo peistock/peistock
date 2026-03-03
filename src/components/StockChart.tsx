@@ -53,10 +53,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     const ma225DeductIndex = lastIndex >= 224 ? lastIndex - 224 : -1;
     
     // 构建PVT背离标记点数据：
-    // 顶背离(S)：连续2天及以上 + BIAS>10%（标注第一天，绿色S）
+    // 顶背离(S)：连续2天及以上 + BIAS>50%（标注第一天，绿色S）
     // 底背离(B)：连续2天及以上 + 两天CRI>=60 + 两天成本偏离度分位数<50%（标注最后一天，红色B）
-    // 极端恐惧买入(B)：成本偏离度分位数<5% + BIAS225分位数<5% + CRI>90（紫色B）
-    // 极端贪婪卖出(S)：贪婪>99%+BIAS>90%，连续满足时在最后一天的后一天标记（橙色S）
+    // 极端恐惧买入(B)：成本偏离度<5% + BIAS225<5% + CRI>90，在连续段落中只标记DI拐点（紫色B）
+    // 极端贪婪卖出(S)：贪婪>90%+BIAS>90%，在连续段落中只标记DI拐点（橙色S）
     const pvtDivergenceMarks: echarts.MarkPointComponentOption['data'] = [];
     
     // 先计算连续背离天数和连续段信息
@@ -117,13 +117,14 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       return false;
     };
     
-    // 顶背离：连续2天及以上显示（第一天）；底背离：连续3天及以上+两天CRI>=70+两天成本偏离度分位数<50%（最后一天）
+    // 顶背离：连续2天及以上+BIAS>50%（第一天）；底背离：连续3天及以上+两天CRI>=70+两天成本偏离度分位数<50%（最后一天）
     pvtDivergenceData.forEach((div, index) => {
       if (div === 'top') {
-        // 顶背离：>=2天（第一天）
+        // 顶背离：>=2天（第一天）+ BIAS>50%
         const count = consecutiveCount[index];
         const startIdx = consecutiveStart[index];
-        if (count >= 2 && index === startIdx) {
+        const biasPct = bias225PercentileData[index];
+        if (count >= 2 && index === startIdx && biasPct !== null && biasPct > 50) {
           const price = stockData[index]?.low;
           if (price !== undefined) {
             pvtDivergenceMarks.push({
@@ -181,115 +182,239 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     
     // 构建极端恐惧买入标记（新增维度）
     // 条件：成本偏离度分位数<5% + BIAS225分位数<5% + CRI>90
+    // 在连续满足条件的段落中，只标记DI找到的拐点日
+    
+    // 第一步：找出所有满足基本条件的日子
+    const eligibleDays: number[] = [];
     stockData.forEach((_, index) => {
       const costDevPct = costDeviationPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
       const cri = criData[index];
       
-      // 检查三个条件是否同时满足
       if (costDevPct !== null && costDevPct < 5 && 
           bias225Pct !== null && bias225Pct < 5 && 
           cri !== null && cri > 90) {
-        // 确保不与底背离B重叠（如果已经有底背离标记则跳过）
-        const hasBottomMark = pvtDivergenceMarks.some(mark => {
-          const coord = mark.coord as [number, number];
-          return coord[0] === index;
-        });
+        eligibleDays.push(index);
+      }
+    });
+    
+    // 第二步：将连续的日子分组成段落
+    const eligibleStreaks: { start: number; end: number; days: number[] }[] = [];
+    let currentEligibleStreak: number[] = [];
+    
+    for (let i = 0; i < eligibleDays.length; i++) {
+      const day = eligibleDays[i];
+      const prevDay = eligibleDays[i - 1];
+      
+      if (i === 0 || day === prevDay + 1) {
+        // 连续或第一天
+        currentEligibleStreak.push(day);
+      } else {
+        // 断开，保存之前的段落
+        if (currentEligibleStreak.length > 0) {
+          eligibleStreaks.push({
+            start: currentEligibleStreak[0],
+            end: currentEligibleStreak[currentEligibleStreak.length - 1],
+            days: [...currentEligibleStreak]
+          });
+        }
+        currentEligibleStreak = [day];
+      }
+    }
+    // 保存最后一个段落
+    if (currentEligibleStreak.length > 0) {
+      eligibleStreaks.push({
+        start: currentEligibleStreak[0],
+        end: currentEligibleStreak[currentEligibleStreak.length - 1],
+        days: [...currentEligibleStreak]
+      });
+    }
+    
+    // 第三步：在每个段落中找到DI拐点日
+    eligibleStreaks.forEach(streak => {
+      let pivotIdx = -1;
+      
+      // 在该段落内查找DI拐点
+      // 找 -DI 从上升转为下降的日子（卖压减弱）
+      for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+        const prevMinusDI = indicators[i - 1].minusDI;
+        const currMinusDI = indicators[i].minusDI;
+        const nextMinusDI = indicators[i + 1]?.minusDI;
         
-        if (!hasBottomMark) {
-          const price = stockData[index]?.low;
-          if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端恐惧买入',
-              coord: [index, price],
-              value: 'B',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'B',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#D946EF', // 紫色B，与底背离的红色B区分
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+        if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
+          // -DI 先上升后下降（峰值点）
+          if (currMinusDI > prevMinusDI && currMinusDI > nextMinusDI) {
+            pivotIdx = i;
+            break; // 找到第一个拐点就停止
           }
+        }
+      }
+      
+      // 如果没找到 -DI 拐点，尝试找 +DI 从下降转为上升（买压增强）
+      if (pivotIdx === -1) {
+        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+          const prevPlusDI = indicators[i - 1].plusDI;
+          const currPlusDI = indicators[i].plusDI;
+          const nextPlusDI = indicators[i + 1]?.plusDI;
+          
+          if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
+            // +DI 先下降后上升（谷值点）
+            if (currPlusDI < prevPlusDI && currPlusDI < nextPlusDI) {
+              pivotIdx = i;
+              break;
+            }
+          }
+        }
+      }
+      
+      // 如果还没找到，使用段落的最后一天
+      if (pivotIdx === -1) {
+        pivotIdx = streak.end;
+      }
+      
+      // 确保不与底背离B重叠
+      const hasBottomMark = pvtDivergenceMarks.some(mark => {
+        const coord = mark.coord as [number, number];
+        return coord[0] === pivotIdx;
+      });
+      
+      if (!hasBottomMark) {
+        const price = stockData[pivotIdx]?.low;
+        if (price !== undefined) {
+          pvtDivergenceMarks.push({
+            name: '极端恐惧买入',
+            coord: [pivotIdx, price],
+            value: 'B',
+            symbol: 'rect',
+            symbolSize: [14, 14],
+            itemStyle: { color: 'transparent' },
+            label: {
+              show: true,
+              formatter: 'B',
+              fontSize: 11,
+              fontWeight: 'bold',
+              color: '#D946EF', // 紫色B，与底背离的红色B区分
+              backgroundColor: 'rgba(22,27,34,0.85)',
+              padding: [1, 3],
+              borderRadius: 2,
+            },
+          });
         }
       }
     });
     
     // 构建极端贪婪卖出标记（新增维度）
-    // 条件：贪婪指数分位数>99% 且 BIAS225分位数>90%
-    // 如果连续满足，记录最后一天，在最后一天的后一天标记S
-    const extremeGreedyStreaks: { start: number; end: number }[] = [];
-    let greedyCurrentStart = -1;
-    let greedyCurrentEnd = -1;
+    // 条件：贪婪指数分位数>90% 且 BIAS225分位数>90%
+    // 在连续满足条件的段落中，只标记DI找到的拐点日
     
-    // 第一步：找出所有连续满足条件的段落
-    for (let i = 0; i < stockData.length; i++) {
-      const greedyPct = greedyPercentileData[i];
-      const bias225Pct = bias225PercentileData[i];
+    // 第一步：找出所有满足基本条件的日子
+    const greedyEligibleDays: number[] = [];
+    stockData.forEach((_, index) => {
+      const greedyPct = greedyPercentileData[index];
+      const bias225Pct = bias225PercentileData[index];
       
-      const isExtremeGreedy = greedyPct !== null && greedyPct > 99 &&
-                              bias225Pct !== null && bias225Pct > 90;
+      if (greedyPct !== null && greedyPct > 95 && 
+          bias225Pct !== null && bias225Pct > 90) {
+        greedyEligibleDays.push(index);
+      }
+    });
+    
+    // 第二步：将连续的日子分组成段落
+    const greedyStreaks: { start: number; end: number; days: number[] }[] = [];
+    let currentGreedyStreak: number[] = [];
+    
+    for (let i = 0; i < greedyEligibleDays.length; i++) {
+      const day = greedyEligibleDays[i];
+      const prevDay = greedyEligibleDays[i - 1];
       
-      if (isExtremeGreedy) {
-        if (greedyCurrentStart === -1) {
-          greedyCurrentStart = i;
-          greedyCurrentEnd = i;
-        } else {
-          greedyCurrentEnd = i;
-        }
+      if (i === 0 || day === prevDay + 1) {
+        currentGreedyStreak.push(day);
       } else {
-        if (greedyCurrentStart !== -1) {
-          extremeGreedyStreaks.push({ start: greedyCurrentStart, end: greedyCurrentEnd });
-          greedyCurrentStart = -1;
-          greedyCurrentEnd = -1;
+        if (currentGreedyStreak.length > 0) {
+          greedyStreaks.push({
+            start: currentGreedyStreak[0],
+            end: currentGreedyStreak[currentGreedyStreak.length - 1],
+            days: [...currentGreedyStreak]
+          });
         }
+        currentGreedyStreak = [day];
       }
     }
-    // 处理末尾的连续段
-    if (greedyCurrentStart !== -1) {
-      extremeGreedyStreaks.push({ start: greedyCurrentStart, end: greedyCurrentEnd });
+    if (currentGreedyStreak.length > 0) {
+      greedyStreaks.push({
+        start: currentGreedyStreak[0],
+        end: currentGreedyStreak[currentGreedyStreak.length - 1],
+        days: [...currentGreedyStreak]
+      });
     }
     
-    // 第二步：在每个连续段的最后一天的后一天标记S
-    extremeGreedyStreaks.forEach(streak => {
-      const markIdx = streak.end + 1; // 最后一天的后一天
+    // 第三步：在每个段落中找到DI拐点日
+    greedyStreaks.forEach(streak => {
+      let pivotIdx = -1;
       
-      // 确保索引有效且不与顶背离S重叠
-      if (markIdx < stockData.length) {
-        const hasTopMark = pvtDivergenceMarks.some(mark => {
-          const coord = mark.coord as [number, number];
-          return coord[0] === markIdx;
-        });
+      // 在该段落内查找DI拐点（上涨趋势中）
+      // 找 +DI 从上升转为下降的日子（买压减弱）
+      for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+        const prevPlusDI = indicators[i - 1].plusDI;
+        const currPlusDI = indicators[i].plusDI;
+        const nextPlusDI = indicators[i + 1]?.plusDI;
         
-        if (!hasTopMark) {
-          const price = stockData[markIdx]?.high; // 卖出标记在K线上方
-          if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端贪婪卖出',
-              coord: [markIdx, price],
-              value: 'S',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'S',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#F97316', // 橙色S，与顶背离的绿色S区分
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+        if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
+          if (currPlusDI > prevPlusDI && currPlusDI > nextPlusDI) {
+            pivotIdx = i;
+            break;
           }
+        }
+      }
+      
+      // 如果没找到 +DI 拐点，尝试找 -DI 从下降转为上升（卖压增强）
+      if (pivotIdx === -1) {
+        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+          const prevMinusDI = indicators[i - 1].minusDI;
+          const currMinusDI = indicators[i].minusDI;
+          const nextMinusDI = indicators[i + 1]?.minusDI;
+          
+          if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
+            if (currMinusDI < prevMinusDI && currMinusDI < nextMinusDI) {
+              pivotIdx = i;
+              break;
+            }
+          }
+        }
+      }
+      
+      // 如果还没找到，使用段落的最后一天
+      if (pivotIdx === -1) {
+        pivotIdx = streak.end;
+      }
+      
+      // 确保不与顶背离S重叠
+      const hasTopMark = pvtDivergenceMarks.some(mark => {
+        const coord = mark.coord as [number, number];
+        return coord[0] === pivotIdx;
+      });
+      
+      if (!hasTopMark) {
+        const price = stockData[pivotIdx]?.high;
+        if (price !== undefined) {
+          pvtDivergenceMarks.push({
+            name: '极端贪婪卖出',
+            coord: [pivotIdx, price],
+            value: 'S',
+            symbol: 'rect',
+            symbolSize: [14, 14],
+            itemStyle: { color: 'transparent' },
+            label: {
+              show: true,
+              formatter: 'S',
+              fontSize: 11,
+              fontWeight: 'bold',
+              color: '#F97316',
+              backgroundColor: 'rgba(22,27,34,0.85)',
+              padding: [1, 3],
+              borderRadius: 2,
+            },
+          });
         }
       }
     });
@@ -516,6 +641,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
+              { name: 'S顶背离:≥2天+BIAS>50%', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: 'S贪婪:贪婪>95%+BIAS>90%', icon: 'rect', itemStyle: { color: '#F97316' } },
+              { name: 'B底背离:≥2天+CRI≥60+成本<50%', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'B恐慌:成本<5%+BIAS<5%+CRI>90', icon: 'rect', itemStyle: { color: '#D946EF' } },
             ]
           : [
               { name: 'MA5', icon: 'rect', itemStyle: { color: '#FFFFFF' } },
@@ -528,6 +657,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
+              { name: 'S(顶背离)', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: 'S(贪婪卖出)', icon: 'rect', itemStyle: { color: '#F97316' } },
+              { name: 'B(底背离)', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: 'B(恐慌买入)', icon: 'rect', itemStyle: { color: '#D946EF' } },
             ],
         textStyle: { color: '#8B949E', fontSize: compact ? 7 : 8 },
         top: 32,

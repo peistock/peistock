@@ -71,6 +71,7 @@ export interface IndicatorData {
   // ADX趋势强度
   adx: number | null; // ADX值 0-100
   adxState: 'rising' | 'falling' | 'flat' | null; // ADX趋势状态
+  adxExhaustion: 'bottom' | 'top' | null; // ADX衰竭信号
   plusDI: number | null; // +DI值
   minusDI: number | null; // -DI值
   // PVT价量趋势

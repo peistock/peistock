@@ -6,7 +6,8 @@ import StockChart from './components/StockChart';
 import HelpDialog from './components/HelpDialog';
 import { calculateAllIndicators } from './utils/indicators';
 import { getMultiTimeframeData, getQuote, formatSymbol, getMarketName } from './utils/eastmoneyApi';
-import { getMultiTimeframeData as getSinaMultiData, getQuote as getSinaQuote, formatSymbol as formatSinaSymbol } from './utils/sinaApi';
+import { getMultiTimeframeData as getTencentMultiData, getQuote as getTencentQuote } from './utils/tencentApi';
+import { getMultiTimeframeData as getBiyingMultiData, getQuote as getBiyingQuote, isAvailable as isBiyingAvailable } from './utils/biyingApi';
 import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -95,19 +96,35 @@ function App() {
       } catch (eastmoneyErr: any) {
         console.log('东方财富API失败:', eastmoneyErr.message || eastmoneyErr);
         
+        // 东方财富失败，切换到腾讯财经API
         try {
-          // 东方财富失败，切换到新浪API
-          console.log('切换到新浪API备用...');
-          const sinaSymbol = formatSinaSymbol(symbol);
+          console.log('切换到腾讯财经API...');
           [multiData, quote] = await Promise.all([
-            getSinaMultiData(sinaSymbol),
-            getSinaQuote(sinaSymbol),
+            getTencentMultiData(symbol),
+            getTencentQuote(symbol),
           ]);
-          apiSource = '新浪数据';
-          console.log('新浪API成功');
-        } catch (sinaErr: any) {
-          console.log('新浪API也失败:', sinaErr.message || sinaErr);
-          throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 新浪: ${sinaErr.message || '失败'}`);
+          apiSource = '腾讯财经';
+          console.log('腾讯财经API成功');
+        } catch (tencentErr: any) {
+          console.log('腾讯财经API失败:', tencentErr.message || tencentErr);
+          
+          // 如果必盈数据配置了 licence，最后尝试必盈数据
+          if (isBiyingAvailable()) {
+            try {
+              console.log('切换到必盈数据API...');
+              [multiData, quote] = await Promise.all([
+                getBiyingMultiData(symbol),
+                getBiyingQuote(symbol),
+              ]);
+              apiSource = '必盈数据';
+              console.log('必盈数据API成功');
+            } catch (biyingErr: any) {
+              console.log('必盈数据API也失败:', biyingErr.message || biyingErr);
+              throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 腾讯: ${tencentErr.message || '失败'}; 必盈: ${biyingErr.message || '失败'}`);
+            }
+          } else {
+            throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 腾讯: ${tencentErr.message || '失败'}`);
+          }
         }
       }
       
