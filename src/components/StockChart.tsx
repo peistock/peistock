@@ -11,9 +11,49 @@ interface StockChartProps {
   title?: string;
   compact?: boolean;
   timeframe?: 'daily' | 'weekly' | 'min15';
+  version?: 'strict' | 'loose'; // 严格版/宽松版
 }
 
-const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe }: StockChartProps) => {
+const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
+  // 根据版本设置阈值参数
+  const thresholds: {
+    buyCostDev: number;
+    buyBias: number;
+    buyCRI: number;
+    sellGreedy: number;
+    sellBias: number;
+    sellCostDev: number;
+    labelB: string;
+    labelS: string;
+    useAndLogic: boolean;
+  } = version === 'strict' 
+    ? {
+        // 严格版（原正式版）: 需同时满足所有条件（AND逻辑）
+        buyCostDev: 5,
+        buyBias: 5,
+        buyCRI: 90,
+        sellGreedy: 95,
+        sellBias: 90,
+        sellCostDev: 95,
+        labelB: 'B:低频(costDev<5%&bias<5%&CRI>90)',
+        labelS: 'S:低频(greedy>95%&bias>90%)',
+        useAndLogic: true,
+      }
+    : {
+        // 高频BS: 满足任一条件即可（OR逻辑）
+        // 但CRI不能单独触发，需结合价位（costDev < 30%）避免顶部买入
+        // B: costDev<10% | bias<10% | (CRI>83 & costDev<30%)
+        // S: greedy>95% | bias>95%
+        buyCostDev: 10,
+        buyBias: 10,
+        buyCRI: 83,
+        sellGreedy: 95,
+        sellBias: 95,
+        sellCostDev: 95,
+        labelB: 'B:高频(低频条件ORcostDev<10%ORbias<10%OR(CRI>83&costDev<30%))',
+        labelS: 'S:高频(低频条件ORgreedy>95%ORbias>95%)',
+        useAndLogic: false,
+      };
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,11 +92,13 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     const ma60DeductIndex = lastIndex >= 59 ? lastIndex - 59 : -1;
     const ma225DeductIndex = lastIndex >= 224 ? lastIndex - 224 : -1;
     
-    // 构建PVT背离标记点数据：
+    // 构建PVT背离标记点数据（平衡版阈值，收紧5pct）：
     // 顶背离(S)：连续2天及以上 + BIAS>50%（标注第一天，绿色S）
-    // 底背离(B)：连续2天及以上 + 两天CRI>=60 + 两天成本偏离度分位数<50%（标注最后一天，红色B）
-    // 极端恐惧买入(B)：成本偏离度<5% + BIAS225<5% + CRI>90，在连续段落中只标记DI拐点（紫色B）
-    // 极端贪婪卖出(S)：贪婪>90%+BIAS>90%，在连续段落中只标记DI拐点（橙色S）
+    // 底背离(B)：连续2天及以上 + 两天CRI>=60 + 两天成本偏离度分位数<15%（标注最后一天，红色B）
+    // 极端恐惧买入(B)：costDev<15% | bias<15% | CRI>75，在连续段落中只标记DI拐点（紫色B）
+    // 极端贪婪卖出(S)：greedy>90% | bias>90% | costDev>90%，在连续段落中只标记DI拐点（橙色S）
+    // 成本低位B：costDev < 15%（蓝色B）
+    // BIAS低位B：bias225 < 15%（青色B）
     const pvtDivergenceMarks: echarts.MarkPointComponentOption['data'] = [];
     
     // 先计算连续背离天数和连续段信息
@@ -95,7 +137,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       }
     }
     
-    // 帮助函数：检查底背离连续段中是否有任意两天CRI>=60
+    // 帮助函数：检查底背离连续段中是否有任意两天CRI>=60（放宽版阈值）
     const hasHighCRIInStreak = (startIdx: number, count: number): boolean => {
       let highCount = 0;
       for (let i = startIdx; i < startIdx + count && i < criData.length; i++) {
@@ -106,12 +148,12 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       return false;
     };
     
-    // 帮助函数：检查底背离连续段中是否有任意两天成本偏离度历史分位数<50%
+    // 帮助函数：检查底背离连续段中是否有任意两天成本偏离度历史分位数<15%（平衡版）
     const hasLowCostDevPercentileInStreak = (startIdx: number, count: number): boolean => {
       let lowCount = 0;
       for (let i = startIdx; i < startIdx + count && i < costDeviationPercentileData.length; i++) {
         const pct = costDeviationPercentileData[i];
-        if (pct !== null && pct < 50) lowCount++;
+        if (pct !== null && pct < 15) lowCount++; // 收紧到15%
         if (lowCount >= 2) return true;
       }
       return false;
@@ -180,21 +222,43 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       }
     });
     
-    // 构建极端恐惧买入标记（新增维度）
-    // 条件：成本偏离度分位数<5% + BIAS225分位数<5% + CRI>90
-    // 在连续满足条件的段落中，只标记DI找到的拐点日
+    // 构建极端恐惧买入标记
+    // 条件1（紫色B-极端恐惧）：costDev < buyCostDev% & bias < buyBias% & CRI > buyCRI
+    // 条件2（蓝色B-成本低位）：costDev < buyCostDev%
+    // 条件3（青色B-BIAS低位）：bias225 < buyBias%
     
-    // 第一步：找出所有满足基本条件的日子
+    // ========== 第一步：找出所有满足极端恐惧条件的日子 ==========
     const eligibleDays: number[] = [];
     stockData.forEach((_, index) => {
       const costDevPct = costDeviationPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
       const cri = criData[index];
       
-      if (costDevPct !== null && costDevPct < 5 && 
-          bias225Pct !== null && bias225Pct < 5 && 
-          cri !== null && cri > 90) {
-        eligibleDays.push(index);
+      // 根据版本设置阈值
+      const isCostDevLow = costDevPct !== null && costDevPct < thresholds.buyCostDev;
+      const isBiasLow = bias225Pct !== null && bias225Pct < thresholds.buyBias;
+      const isCRIHigh = cri !== null && cri > thresholds.buyCRI;
+      
+      // 低频BS：AND逻辑（同时满足）
+      // 高频BS：低频BS条件 OR 更宽松的条件
+      const isLowFreqSignal = isCostDevLow && isBiasLow && isCRIHigh;
+      
+      if (thresholds.useAndLogic) {
+        // 低频BS：三个条件同时满足
+        if (isLowFreqSignal) {
+          eligibleDays.push(index);
+        }
+      } else {
+        // 高频BS：低频BS条件 OR (costDev<10% 或 bias<10% 或 (CRI>83 且 costDev<30%))
+        const isCostDevMedium = costDevPct !== null && costDevPct < 30; // CRI触发时的价位条件
+        const isCostDevRelaxed = costDevPct !== null && costDevPct < 10; // 宽松版costDev条件
+        const isBiasRelaxed = bias225Pct !== null && bias225Pct < 10; // 宽松版bias条件
+        const criWithPrice = isCRIHigh && isCostDevMedium; // CRI高且价位不太高
+        
+        // 低频BS条件 OR 高频扩展条件
+        if (isLowFreqSignal || isCostDevRelaxed || isBiasRelaxed || criWithPrice) {
+          eligibleDays.push(index);
+        }
       }
     });
     
@@ -303,19 +367,34 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       }
     });
     
-    // 构建极端贪婪卖出标记（新增维度）
-    // 条件：贪婪指数分位数>90% 且 BIAS225分位数>90%
-    // 在连续满足条件的段落中，只标记DI找到的拐点日
+    // 构建极端贪婪卖出标记
+    // 条件1（橙色S-极端贪婪）：greedy > sellGreedy% & bias > sellBias%
+    // 条件2（黄色S-成本高位）：costDev > sellCostDev%
+    // 条件3（粉色S-BIAS高位）：bias225 > sellBias%
     
-    // 第一步：找出所有满足基本条件的日子
+    // ========== 第一步：找出所有满足贪婪条件的日子 ==========
     const greedyEligibleDays: number[] = [];
     stockData.forEach((_, index) => {
       const greedyPct = greedyPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
+      // 根据版本设置阈值
+      const isGreedyHigh = greedyPct !== null && greedyPct > thresholds.sellGreedy;
+      const isBiasHigh = bias225Pct !== null && bias225Pct > thresholds.sellBias;
       
-      if (greedyPct !== null && greedyPct > 95 && 
-          bias225Pct !== null && bias225Pct > 90) {
-        greedyEligibleDays.push(index);
+      // 低频BS：greedy和bias同时满足
+      // 高频BS：低频BS条件 OR 更宽松的条件
+      const isLowFreqSellSignal = isGreedyHigh && isBiasHigh;
+      
+      if (thresholds.useAndLogic) {
+        // 低频BS：greedy和bias同时满足
+        if (isLowFreqSellSignal) {
+          greedyEligibleDays.push(index);
+        }
+      } else {
+        // 高频BS：低频BS条件 OR (greedy>95% 或 bias>95%)
+        if (isLowFreqSellSignal || isGreedyHigh || isBiasHigh) {
+          greedyEligibleDays.push(index);
+        }
       }
     });
     
@@ -642,9 +721,9 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
               { name: 'S顶背离:≥2天+BIAS>50%', icon: 'rect', itemStyle: { color: '#03B172' } },
-              { name: 'S贪婪:贪婪>95%+BIAS>90%', icon: 'rect', itemStyle: { color: '#F97316' } },
-              { name: 'B底背离:≥2天+CRI≥60+成本<50%', icon: 'rect', itemStyle: { color: '#FF3435' } },
-              { name: 'B恐慌:成本<5%+BIAS<5%+CRI>90', icon: 'rect', itemStyle: { color: '#D946EF' } },
+              { name: thresholds.labelS, icon: 'rect', itemStyle: { color: '#F97316' } },
+              { name: 'B底背离:≥2天+CRI≥60+成本<15%', icon: 'rect', itemStyle: { color: '#FF3435' } },
+              { name: thresholds.labelB, icon: 'rect', itemStyle: { color: '#D946EF' } },
             ]
           : [
               { name: 'MA5', icon: 'rect', itemStyle: { color: '#FFFFFF' } },
@@ -658,9 +737,9 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
               { name: 'S(顶背离)', icon: 'rect', itemStyle: { color: '#03B172' } },
-              { name: 'S(贪婪卖出)', icon: 'rect', itemStyle: { color: '#F97316' } },
+              { name: version === 'strict' ? 'S(严格)' : 'S(宽松)', icon: 'rect', itemStyle: { color: '#F97316' } },
               { name: 'B(底背离)', icon: 'rect', itemStyle: { color: '#FF3435' } },
-              { name: 'B(恐慌买入)', icon: 'rect', itemStyle: { color: '#D946EF' } },
+              { name: version === 'strict' ? 'B(严格)' : 'B(宽松)', icon: 'rect', itemStyle: { color: '#D946EF' } },
             ],
         textStyle: { color: '#8B949E', fontSize: compact ? 7 : 8 },
         top: 32,
@@ -844,7 +923,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe]);
+  }, [stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe, version]);
 
   return (
     <div className={`relative w-full bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${compact ? 'h-full' : 'h-[600px]'}`}>

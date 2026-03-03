@@ -43,6 +43,9 @@ function App() {
   const [showEMAHS, setShowEMAHS] = useState(true);
   const [showMA, setShowMA] = useState(true);
   
+  // 信号版本切换：严格版(默认) / 宽松版
+  const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
+  
   // 收藏功能 - 存储代码和名称
   interface FavoriteItem {
     symbol: string;
@@ -215,7 +218,9 @@ function App() {
                 <h1 className="text-xl font-bold text-white" style={{ fontFamily: 'JetBrains Mono' }}>
                   Peter趋势交易系统
                 </h1>
-                <p className="text-xs text-[#8B949E]">{apiSource || '东方财富/新浪数据'}</p>
+                <p className="text-xs text-[#8B949E]">
+                  {apiSource || '东方财富/新浪数据'} · 联系: 84160034@qq.com
+                </p>
               </div>
             </div>
             
@@ -305,6 +310,8 @@ function App() {
             onToggleEMAHS={setShowEMAHS}
             showMA={showMA}
             onToggleMA={setShowMA}
+            signalVersion={signalVersion}
+            onToggleSignalVersion={() => setSignalVersion(prev => prev === 'strict' ? 'loose' : 'strict')}
           />
         </section>
 
@@ -820,6 +827,7 @@ function App() {
                           showMA={showMA}
                           title=""
                           timeframe={tf}
+                          version={signalVersion}
                         />
                       </div>
                     </div>

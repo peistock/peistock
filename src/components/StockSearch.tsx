@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Star } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Star, ToggleLeft, ToggleRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -27,6 +27,9 @@ interface StockSearchProps {
   onToggleEMAHS?: (value: boolean) => void;
   showMA?: boolean;
   onToggleMA?: (value: boolean) => void;
+  // 信号版本切换
+  signalVersion?: 'strict' | 'loose';
+  onToggleSignalVersion?: () => void;
 }
 
 // 最近搜索存储键
@@ -41,7 +44,8 @@ interface RecentSearch {
 
 const StockSearch = ({ 
   onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
-  showMAHS, onToggleMAHS, showEMAHS, onToggleEMAHS, showMA, onToggleMA 
+  showMAHS, onToggleMAHS, showEMAHS, onToggleEMAHS, showMA, onToggleMA,
+  signalVersion = 'strict', onToggleSignalVersion
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
@@ -168,6 +172,29 @@ const StockSearch = ({
           {/* 指标控制开关 */}
           {onToggleMAHS && onToggleEMAHS && onToggleMA && (
             <div className="flex items-center gap-4">
+              {/* B/S信号版本切换 */}
+              {onToggleSignalVersion && (
+                <button
+                  onClick={onToggleSignalVersion}
+                  className={`flex items-center gap-1 text-sm font-medium transition-colors ${
+                    signalVersion === 'strict' 
+                      ? 'text-[#58A6FF] hover:text-[#79C0FF]' 
+                      : 'text-[#E3B341] hover:text-[#F0D95A]'
+                  }`}
+                  title={signalVersion === 'strict' 
+                    ? '低频BS: costDev<5%&bias<5%&CRI>90 | greedy>95%&bias>90%' 
+                    : '高频BS: 低频条件 OR costDev<10%|bias<10%|(CRI>83&costDev<30%) | greedy>95%|bias>95%'}
+                >
+                  {signalVersion === 'strict' ? (
+                    <><ToggleRight className="w-4 h-4" /> 低频BS</>
+                  ) : (
+                    <><ToggleLeft className="w-4 h-4" /> 高频BS</>
+                  )}
+                </button>
+              )}
+              
+              <div className="w-px h-4 bg-[#30363D]" />
+              
               <div className="flex items-center gap-2">
                 <Switch
                   id="mahs"
