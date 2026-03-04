@@ -79,13 +79,14 @@ export async function getKlines(
   }
   
   // 解析数据 [日期, 开盘, 收盘, 最低, 最高, 成交量]
+  // 注意：腾讯API返回的成交量是"手"，需要×100转换为"股"
   return klines.map((item: any) => ({
     date: item[0],
     open: parseFloat(item[1]) || 0,
     close: parseFloat(item[2]) || 0,
     low: parseFloat(item[3]) || 0,
     high: parseFloat(item[4]) || 0,
-    volume: parseInt(item[5]) || 0,
+    volume: (parseInt(item[5]) || 0) * 100, // 手转股的
     amount: 0, // 腾讯 API 不直接提供成交额
   }));
 }
