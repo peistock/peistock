@@ -15,6 +15,13 @@ interface StockChartProps {
 }
 
 const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
+  // 低频BS阈值（固定）
+  const LOW_FREQ_BUY = { costDev: 5, bias: 5, cri: 90 };
+  const LOW_FREQ_SELL = { greedy: 95, bias: 90 };
+  
+  // 高频BS阈值
+  const HIGH_FREQ_BUY = { costDev: 10, bias: 10, cri: 83 };
+  
   // 根据版本设置阈值参数
   const thresholds: {
     buyCostDev: number;
@@ -28,27 +35,25 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     useAndLogic: boolean;
   } = version === 'strict' 
     ? {
-        // 严格版（原正式版）: 需同时满足所有条件（AND逻辑）
-        buyCostDev: 5,
-        buyBias: 5,
-        buyCRI: 90,
-        sellGreedy: 95,
-        sellBias: 90,
+        // 低频BS: 需同时满足所有条件（AND逻辑）
+        buyCostDev: LOW_FREQ_BUY.costDev,
+        buyBias: LOW_FREQ_BUY.bias,
+        buyCRI: LOW_FREQ_BUY.cri,
+        sellGreedy: LOW_FREQ_SELL.greedy,
+        sellBias: LOW_FREQ_SELL.bias,
         sellCostDev: 95,
         labelB: 'B:低频(costDev<5%&bias<5%&CRI>90)',
         labelS: 'S:低频(greedy>95%&bias>90%)',
         useAndLogic: true,
       }
     : {
-        // 高频BS: 满足任一条件即可（OR逻辑）
+        // 高频BS: 低频条件 OR 高频扩展条件（OR逻辑）
         // 但CRI不能单独触发，需结合价位（costDev < 30%）避免顶部买入
-        // B: costDev<10% | bias<10% | (CRI>83 & costDev<30%)
-        // S: greedy>95% | bias>95%
-        buyCostDev: 10,
-        buyBias: 10,
-        buyCRI: 83,
-        sellGreedy: 95,
-        sellBias: 95,
+        buyCostDev: HIGH_FREQ_BUY.costDev,
+        buyBias: HIGH_FREQ_BUY.bias,
+        buyCRI: HIGH_FREQ_BUY.cri,
+        sellGreedy: LOW_FREQ_SELL.greedy,  // 卖出用低频阈值
+        sellBias: LOW_FREQ_SELL.bias,
         sellCostDev: 95,
         labelB: 'B:高频(低频条件ORcostDev<10%ORbias<10%OR(CRI>83&costDev<30%))',
         labelS: 'S:高频(低频条件ORgreedy>95%ORbias>95%)',
@@ -227,102 +232,81 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     // 条件2（蓝色B-成本低位）：costDev < buyCostDev%
     // 条件3（青色B-BIAS低位）：bias225 < buyBias%
     
-    // ========== 第一步：找出所有满足极端恐惧条件的日子 ==========
-    const eligibleDays: number[] = [];
+    // ========== 高频BS：分别计算低频和高频信号，确保低频信号不被合并 ==========
+    
+    // 第一步A：找出低频BS满足的日子
+    const lowFreqDays: number[] = [];
     stockData.forEach((_, index) => {
       const costDevPct = costDeviationPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
       const cri = criData[index];
       
-      // 根据版本设置阈值
-      const isCostDevLow = costDevPct !== null && costDevPct < thresholds.buyCostDev;
-      const isBiasLow = bias225Pct !== null && bias225Pct < thresholds.buyBias;
-      const isCRIHigh = cri !== null && cri > thresholds.buyCRI;
+      const isCostDevLowFreq = costDevPct !== null && costDevPct < LOW_FREQ_BUY.costDev; // <5%
+      const isBiasLowFreq = bias225Pct !== null && bias225Pct < LOW_FREQ_BUY.bias; // <5%
+      const isCRILowFreq = cri !== null && cri > LOW_FREQ_BUY.cri; // >90
       
-      // 低频BS：AND逻辑（同时满足）
-      // 高频BS：低频BS条件 OR 更宽松的条件
-      const isLowFreqSignal = isCostDevLow && isBiasLow && isCRIHigh;
-      
-      if (thresholds.useAndLogic) {
-        // 低频BS：三个条件同时满足
-        if (isLowFreqSignal) {
-          eligibleDays.push(index);
-        }
-      } else {
-        // 高频BS：低频BS条件 OR (costDev<10% 或 bias<10% 或 (CRI>83 且 costDev<30%))
-        const isCostDevMedium = costDevPct !== null && costDevPct < 30; // CRI触发时的价位条件
-        const isCostDevRelaxed = costDevPct !== null && costDevPct < 10; // 宽松版costDev条件
-        const isBiasRelaxed = bias225Pct !== null && bias225Pct < 10; // 宽松版bias条件
-        const criWithPrice = isCRIHigh && isCostDevMedium; // CRI高且价位不太高
-        
-        // 低频BS条件 OR 高频扩展条件
-        if (isLowFreqSignal || isCostDevRelaxed || isBiasRelaxed || criWithPrice) {
-          eligibleDays.push(index);
-        }
+      if (isCostDevLowFreq && isBiasLowFreq && isCRILowFreq) {
+        lowFreqDays.push(index);
       }
     });
     
-    // 第二步：将连续的日子分组成段落
-    const eligibleStreaks: { start: number; end: number; days: number[] }[] = [];
-    let currentEligibleStreak: number[] = [];
-    
-    for (let i = 0; i < eligibleDays.length; i++) {
-      const day = eligibleDays[i];
-      const prevDay = eligibleDays[i - 1];
+    // 第二步A：处理低频信号的连续段和拐点（高频模式下也要独立处理低频信号）
+    type StreakType = { start: number; end: number; days: number[] };
+    const processStreaks = (days: number[]): StreakType[] => {
+      const streaks: StreakType[] = [];
+      let currentStreak: number[] = [];
       
-      if (i === 0 || day === prevDay + 1) {
-        // 连续或第一天
-        currentEligibleStreak.push(day);
-      } else {
-        // 断开，保存之前的段落
-        if (currentEligibleStreak.length > 0) {
-          eligibleStreaks.push({
-            start: currentEligibleStreak[0],
-            end: currentEligibleStreak[currentEligibleStreak.length - 1],
-            days: [...currentEligibleStreak]
-          });
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        const prevDay = days[i - 1];
+        
+        if (i === 0 || day === prevDay + 1) {
+          currentStreak.push(day);
+        } else {
+          if (currentStreak.length > 0) {
+            streaks.push({
+              start: currentStreak[0],
+              end: currentStreak[currentStreak.length - 1],
+              days: [...currentStreak]
+            });
+          }
+          currentStreak = [day];
         }
-        currentEligibleStreak = [day];
       }
-    }
-    // 保存最后一个段落
-    if (currentEligibleStreak.length > 0) {
-      eligibleStreaks.push({
-        start: currentEligibleStreak[0],
-        end: currentEligibleStreak[currentEligibleStreak.length - 1],
-        days: [...currentEligibleStreak]
-      });
-    }
+      if (currentStreak.length > 0) {
+        streaks.push({
+          start: currentStreak[0],
+          end: currentStreak[currentStreak.length - 1],
+          days: [...currentStreak]
+        });
+      }
+      return streaks;
+    };
     
-    // 第三步：在每个段落中找到DI拐点日
-    eligibleStreaks.forEach(streak => {
+    // 处理低频信号连续段
+    const lowFreqStreaks = processStreaks(lowFreqDays);
+    
+    // 处理低频拐点
+    const lowFreqPivots: number[] = [];
+    lowFreqStreaks.forEach(streak => {
       let pivotIdx = -1;
-      
-      // 在该段落内查找DI拐点
-      // 找 -DI 从上升转为下降的日子（卖压减弱）
       for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
         const prevMinusDI = indicators[i - 1].minusDI;
         const currMinusDI = indicators[i].minusDI;
         const nextMinusDI = indicators[i + 1]?.minusDI;
-        
         if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
-          // -DI 先上升后下降（峰值点）
           if (currMinusDI > prevMinusDI && currMinusDI > nextMinusDI) {
             pivotIdx = i;
-            break; // 找到第一个拐点就停止
+            break;
           }
         }
       }
-      
-      // 如果没找到 -DI 拐点，尝试找 +DI 从下降转为上升（买压增强）
       if (pivotIdx === -1) {
         for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
           const prevPlusDI = indicators[i - 1].plusDI;
           const currPlusDI = indicators[i].plusDI;
           const nextPlusDI = indicators[i + 1]?.plusDI;
-          
           if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
-            // +DI 先下降后上升（谷值点）
             if (currPlusDI < prevPlusDI && currPlusDI < nextPlusDI) {
               pivotIdx = i;
               break;
@@ -330,114 +314,158 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           }
         }
       }
-      
-      // 如果还没找到，使用段落的最后一天
-      if (pivotIdx === -1) {
-        pivotIdx = streak.end;
-      }
-      
-      // 确保不与底背离B重叠
-      const hasBottomMark = pvtDivergenceMarks.some(mark => {
-        const coord = mark.coord as [number, number];
-        return coord[0] === pivotIdx;
-      });
-      
-      if (!hasBottomMark) {
-        const price = stockData[pivotIdx]?.low;
-        if (price !== undefined) {
-          pvtDivergenceMarks.push({
-            name: '极端恐惧买入',
-            coord: [pivotIdx, price],
-            value: 'B',
-            symbol: 'rect',
-            symbolSize: [14, 14],
-            itemStyle: { color: 'transparent' },
-            label: {
-              show: true,
-              formatter: 'B',
-              fontSize: 11,
-              fontWeight: 'bold',
-              color: '#D946EF', // 紫色B，与底背离的红色B区分
-              backgroundColor: 'rgba(22,27,34,0.85)',
-              padding: [1, 3],
-              borderRadius: 2,
-            },
-          });
-        }
-      }
+      if (pivotIdx === -1) pivotIdx = streak.end;
+      lowFreqPivots.push(pivotIdx);
     });
     
-    // 构建极端贪婪卖出标记
-    // 条件1（橙色S-极端贪婪）：greedy > sellGreedy% & bias > sellBias%
-    // 条件2（黄色S-成本高位）：costDev > sellCostDev%
-    // 条件3（粉色S-BIAS高位）：bias225 > sellBias%
+    // 如果是低频模式，直接用低频拐点；高频模式需要额外处理
+    if (thresholds.useAndLogic) {
+      // 低频模式：只显示低频信号
+      lowFreqPivots.forEach(pivotIdx => {
+        const hasBottomMark = pvtDivergenceMarks.some(mark => {
+          const coord = mark.coord as [number, number];
+          return coord[0] === pivotIdx;
+        });
+        if (!hasBottomMark) {
+          const price = stockData[pivotIdx]?.low;
+          if (price !== undefined) {
+            pvtDivergenceMarks.push({
+              name: '极端恐惧买入',
+              coord: [pivotIdx, price],
+              value: 'B',
+              symbol: 'rect',
+              symbolSize: [14, 14],
+              itemStyle: { color: 'transparent' },
+              label: {
+                show: true,
+                formatter: 'B',
+                fontSize: 11,
+                fontWeight: 'bold',
+                color: '#D946EF',
+                backgroundColor: 'rgba(22,27,34,0.85)',
+                padding: [1, 3],
+                borderRadius: 2,
+              },
+            });
+          }
+        }
+      });
+    } else {
+      // 高频模式：低频信号 + 高频扩展信号
+      // 第一步B：找出高频扩展满足的日子（不包括低频已满足的）
+      const highFreqExtDays: number[] = [];
+      stockData.forEach((_, index) => {
+        // 跳过已经是低频信号的日子
+        if (lowFreqDays.includes(index)) return;
+        
+        const costDevPct = costDeviationPercentileData[index];
+        const bias225Pct = bias225PercentileData[index];
+        const cri = criData[index];
+        
+        const isCostDevRelaxed = costDevPct !== null && costDevPct < HIGH_FREQ_BUY.costDev; // <10%
+        const isBiasRelaxed = bias225Pct !== null && bias225Pct < HIGH_FREQ_BUY.bias; // <10%
+        const isCostDevMedium = costDevPct !== null && costDevPct < 30;
+        const isCRIHigh = cri !== null && cri > HIGH_FREQ_BUY.cri; // >83
+        const criWithPrice = isCRIHigh && isCostDevMedium;
+        
+        if (isCostDevRelaxed || isBiasRelaxed || criWithPrice) {
+          highFreqExtDays.push(index);
+        }
+      });
+      
+      // 第二步B：处理高频扩展信号的连续段
+      const highFreqStreaks = processStreaks(highFreqExtDays);
+      
+      // 处理高频扩展拐点
+      const highFreqPivots: number[] = [];
+      highFreqStreaks.forEach(streak => {
+        let pivotIdx = -1;
+        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+          const prevMinusDI = indicators[i - 1].minusDI;
+          const currMinusDI = indicators[i].minusDI;
+          const nextMinusDI = indicators[i + 1]?.minusDI;
+          if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
+            if (currMinusDI > prevMinusDI && currMinusDI > nextMinusDI) {
+              pivotIdx = i;
+              break;
+            }
+          }
+        }
+        if (pivotIdx === -1) {
+          for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
+            const prevPlusDI = indicators[i - 1].plusDI;
+            const currPlusDI = indicators[i].plusDI;
+            const nextPlusDI = indicators[i + 1]?.plusDI;
+            if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
+              if (currPlusDI < prevPlusDI && currPlusDI < nextPlusDI) {
+                pivotIdx = i;
+                break;
+              }
+            }
+          }
+        }
+        if (pivotIdx === -1) pivotIdx = streak.end;
+        highFreqPivots.push(pivotIdx);
+      });
+      
+      // 合并低频和高频拐点（去重）
+      const allPivots = [...new Set([...lowFreqPivots, ...highFreqPivots])].sort((a, b) => a - b);
+      
+      allPivots.forEach(pivotIdx => {
+        const hasBottomMark = pvtDivergenceMarks.some(mark => {
+          const coord = mark.coord as [number, number];
+          return coord[0] === pivotIdx;
+        });
+        if (!hasBottomMark) {
+          const price = stockData[pivotIdx]?.low;
+          if (price !== undefined) {
+            pvtDivergenceMarks.push({
+              name: '极端恐惧买入',
+              coord: [pivotIdx, price],
+              value: 'B',
+              symbol: 'rect',
+              symbolSize: [14, 14],
+              itemStyle: { color: 'transparent' },
+              label: {
+                show: true,
+                formatter: 'B',
+                fontSize: 11,
+                fontWeight: 'bold',
+                color: '#D946EF',
+                backgroundColor: 'rgba(22,27,34,0.85)',
+                padding: [1, 3],
+                borderRadius: 2,
+              },
+            });
+          }
+        }
+      });
+    }
     
-    // ========== 第一步：找出所有满足贪婪条件的日子 ==========
-    const greedyEligibleDays: number[] = [];
+    // 构建极端贪婪卖出标记
+    // ========== 分别计算低频和高频卖出信号 ==========
+    
+    // 第一步A：找出低频卖出满足的日子
+    const lowFreqSellDays: number[] = [];
     stockData.forEach((_, index) => {
       const greedyPct = greedyPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
-      // 根据版本设置阈值
-      const isGreedyHigh = greedyPct !== null && greedyPct > thresholds.sellGreedy;
-      const isBiasHigh = bias225Pct !== null && bias225Pct > thresholds.sellBias;
-      
-      // 低频BS：greedy和bias同时满足
-      // 高频BS：低频BS条件 OR 更宽松的条件
-      const isLowFreqSellSignal = isGreedyHigh && isBiasHigh;
-      
-      if (thresholds.useAndLogic) {
-        // 低频BS：greedy和bias同时满足
-        if (isLowFreqSellSignal) {
-          greedyEligibleDays.push(index);
-        }
-      } else {
-        // 高频BS：低频BS条件 OR (greedy>95% 或 bias>95%)
-        if (isLowFreqSellSignal || isGreedyHigh || isBiasHigh) {
-          greedyEligibleDays.push(index);
-        }
+      const isGreedyLowFreq = greedyPct !== null && greedyPct > LOW_FREQ_SELL.greedy; // >95%
+      const isBiasLowFreq = bias225Pct !== null && bias225Pct > LOW_FREQ_SELL.bias; // >90%
+      if (isGreedyLowFreq && isBiasLowFreq) {
+        lowFreqSellDays.push(index);
       }
     });
     
-    // 第二步：将连续的日子分组成段落
-    const greedyStreaks: { start: number; end: number; days: number[] }[] = [];
-    let currentGreedyStreak: number[] = [];
-    
-    for (let i = 0; i < greedyEligibleDays.length; i++) {
-      const day = greedyEligibleDays[i];
-      const prevDay = greedyEligibleDays[i - 1];
-      
-      if (i === 0 || day === prevDay + 1) {
-        currentGreedyStreak.push(day);
-      } else {
-        if (currentGreedyStreak.length > 0) {
-          greedyStreaks.push({
-            start: currentGreedyStreak[0],
-            end: currentGreedyStreak[currentGreedyStreak.length - 1],
-            days: [...currentGreedyStreak]
-          });
-        }
-        currentGreedyStreak = [day];
-      }
-    }
-    if (currentGreedyStreak.length > 0) {
-      greedyStreaks.push({
-        start: currentGreedyStreak[0],
-        end: currentGreedyStreak[currentGreedyStreak.length - 1],
-        days: [...currentGreedyStreak]
-      });
-    }
-    
-    // 第三步：在每个段落中找到DI拐点日
-    greedyStreaks.forEach(streak => {
+    // 处理低频卖出连续段
+    const lowFreqSellStreaks = processStreaks(lowFreqSellDays);
+    const lowFreqSellPivots: number[] = [];
+    lowFreqSellStreaks.forEach(streak => {
       let pivotIdx = -1;
-      
-      // 在该段落内查找DI拐点（上涨趋势中）
-      // 找 +DI 从上升转为下降的日子（买压减弱）
       for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
         const prevPlusDI = indicators[i - 1].plusDI;
         const currPlusDI = indicators[i].plusDI;
         const nextPlusDI = indicators[i + 1]?.plusDI;
-        
         if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
           if (currPlusDI > prevPlusDI && currPlusDI > nextPlusDI) {
             pivotIdx = i;
@@ -445,58 +473,107 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           }
         }
       }
+      if (pivotIdx === -1) pivotIdx = streak.end;
+      lowFreqSellPivots.push(pivotIdx);
+    });
+    
+    if (thresholds.useAndLogic) {
+      // 低频模式：只显示低频卖出信号
+      lowFreqSellPivots.forEach(pivotIdx => {
+        const hasTopMark = pvtDivergenceMarks.some(mark => {
+          const coord = mark.coord as [number, number];
+          return coord[0] === pivotIdx;
+        });
+        if (!hasTopMark) {
+          const price = stockData[pivotIdx]?.high;
+          if (price !== undefined) {
+            pvtDivergenceMarks.push({
+              name: '极端贪婪卖出',
+              coord: [pivotIdx, price],
+              value: 'S',
+              symbol: 'rect',
+              symbolSize: [14, 14],
+              itemStyle: { color: 'transparent' },
+              label: {
+                show: true,
+                formatter: 'S',
+                fontSize: 11,
+                fontWeight: 'bold',
+                color: '#F97316',
+                backgroundColor: 'rgba(22,27,34,0.85)',
+                padding: [1, 3],
+                borderRadius: 2,
+              },
+            });
+          }
+        }
+      });
+    } else {
+      // 高频模式：低频卖出 + 高频扩展卖出
+      const highFreqSellExtDays: number[] = [];
+      stockData.forEach((_, index) => {
+        if (lowFreqSellDays.includes(index)) return;
+        const greedyPct = greedyPercentileData[index];
+        const bias225Pct = bias225PercentileData[index];
+        const isGreedyHigh = greedyPct !== null && greedyPct > LOW_FREQ_SELL.greedy; // >95%
+        const isBiasHigh = bias225Pct !== null && bias225Pct > LOW_FREQ_SELL.bias; // >90%
+        if (isGreedyHigh || isBiasHigh) {
+          highFreqSellExtDays.push(index);
+        }
+      });
       
-      // 如果没找到 +DI 拐点，尝试找 -DI 从下降转为上升（卖压增强）
-      if (pivotIdx === -1) {
+      const highFreqSellStreaks = processStreaks(highFreqSellExtDays);
+      const highFreqSellPivots: number[] = [];
+      highFreqSellStreaks.forEach(streak => {
+        let pivotIdx = -1;
         for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-          const prevMinusDI = indicators[i - 1].minusDI;
-          const currMinusDI = indicators[i].minusDI;
-          const nextMinusDI = indicators[i + 1]?.minusDI;
-          
-          if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
-            if (currMinusDI < prevMinusDI && currMinusDI < nextMinusDI) {
+          const prevPlusDI = indicators[i - 1].plusDI;
+          const currPlusDI = indicators[i].plusDI;
+          const nextPlusDI = indicators[i + 1]?.plusDI;
+          if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
+            if (currPlusDI > prevPlusDI && currPlusDI > nextPlusDI) {
               pivotIdx = i;
               break;
             }
           }
         }
-      }
-      
-      // 如果还没找到，使用段落的最后一天
-      if (pivotIdx === -1) {
-        pivotIdx = streak.end;
-      }
-      
-      // 确保不与顶背离S重叠
-      const hasTopMark = pvtDivergenceMarks.some(mark => {
-        const coord = mark.coord as [number, number];
-        return coord[0] === pivotIdx;
+        if (pivotIdx === -1) pivotIdx = streak.end;
+        highFreqSellPivots.push(pivotIdx);
       });
       
-      if (!hasTopMark) {
-        const price = stockData[pivotIdx]?.high;
-        if (price !== undefined) {
-          pvtDivergenceMarks.push({
-            name: '极端贪婪卖出',
-            coord: [pivotIdx, price],
-            value: 'S',
-            symbol: 'rect',
-            symbolSize: [14, 14],
-            itemStyle: { color: 'transparent' },
-            label: {
-              show: true,
-              formatter: 'S',
-              fontSize: 11,
-              fontWeight: 'bold',
-              color: '#F97316',
-              backgroundColor: 'rgba(22,27,34,0.85)',
-              padding: [1, 3],
-              borderRadius: 2,
-            },
-          });
+      // 合并低频和高频卖出拐点
+      const allSellPivots = [...new Set([...lowFreqSellPivots, ...highFreqSellPivots])].sort((a, b) => a - b);
+      
+      allSellPivots.forEach(pivotIdx => {
+        const hasTopMark = pvtDivergenceMarks.some(mark => {
+          const coord = mark.coord as [number, number];
+          return coord[0] === pivotIdx;
+        });
+        if (!hasTopMark) {
+          const price = stockData[pivotIdx]?.high;
+          if (price !== undefined) {
+            pvtDivergenceMarks.push({
+              name: '极端贪婪卖出',
+              coord: [pivotIdx, price],
+              value: 'S',
+              symbol: 'rect',
+              symbolSize: [14, 14],
+              itemStyle: { color: 'transparent' },
+              label: {
+                show: true,
+                formatter: 'S',
+                fontSize: 11,
+                fontWeight: 'bold',
+                color: '#F97316',
+                backgroundColor: 'rgba(22,27,34,0.85)',
+                padding: [1, 3],
+                borderRadius: 2,
+              },
+            });
+          }
         }
-      }
-    });
+      });
+    }
     
     // 构建抵扣价markPoint数据
     const deductMarkPoints: echarts.MarkPointComponentOption['data'] = [];
