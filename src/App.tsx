@@ -134,19 +134,22 @@ function App() {
       // 使用流通股本计算指标
       const capital = quote.capital;
       
+      // 根据API来源确定capital单位类型
+      const capitalUnit: 'shares' | 'ten_thousand_shares' = apiSource === '腾讯财经' ? 'shares' : 'ten_thousand_shares';
+      
       // 为每个时间维度计算指标
       setTimeframeData({
         daily: {
           data: multiData.daily,
-          indicators: calculateAllIndicators(multiData.daily, capital),
+          indicators: calculateAllIndicators(multiData.daily, capital, capitalUnit),
         },
         weekly: {
           data: multiData.weekly,
-          indicators: calculateAllIndicators(multiData.weekly, capital),
+          indicators: calculateAllIndicators(multiData.weekly, capital, capitalUnit),
         },
         min15: {
           data: multiData.min15,
-          indicators: calculateAllIndicators(multiData.min15, capital),
+          indicators: calculateAllIndicators(multiData.min15, capital, capitalUnit),
         },
       });
       

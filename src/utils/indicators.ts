@@ -1002,14 +1002,22 @@ function calculateTrendStrength(
 /**
  * 计算所有指标
  * @param stockData K线数据
- * @param capital 流通股本（股）
+ * @param capital 流通股本（股或万股，取决于unit参数）
+ * @param capitalUnit capital的单位：'shares'=股, 'ten_thousand_shares'=万股
  */
-export function calculateAllIndicators(stockData: StockData[], capital: number): IndicatorData[] {
+export function calculateAllIndicators(
+  stockData: StockData[], 
+  capital: number, 
+  capitalUnit: 'shares' | 'ten_thousand_shares' = 'ten_thousand_shares'
+): IndicatorData[] {
   const closes = stockData.map(d => d.close);
   const volumes = stockData.map(d => d.volume);
   
+  // 统一转换为股
+  const capitalInShares = capitalUnit === 'ten_thousand_shares' ? capital * 10000 : capital;
+  
   // 1. 计算换手天数 DD
-  const dd = calculateDD(volumes, capital);
+  const dd = calculateDD(volumes, capitalInShares);
   
   // 2. 计算换手成本 MAHS
   const mahs = calculateMAHS(closes, dd);
