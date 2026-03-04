@@ -97,6 +97,71 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     const ma60DeductIndex = lastIndex >= 59 ? lastIndex - 59 : -1;
     const ma225DeductIndex = lastIndex >= 224 ? lastIndex - 224 : -1;
     
+    // ========== B/S信号间隔过滤规则 ==========
+    // 规则1: B信号后，5日内跌幅<5%不出现第二个B；6-10日内跌幅<10%不出现B；>10日不受限制
+    // 规则2: S信号后，5日内涨幅<5%不出现第二个S；6-10日内涨幅<10%不出现S；>10日不受限制
+    // 规则3: S信号后，5日内跌幅<5%不出现B；6-10日内跌幅<10%不出现B
+    
+    type SignalRecord = { index: number; price: number; type: 'B' | 'S' };
+    const signalRecords: SignalRecord[] = [];
+    
+    // 检查是否可以添加B信号
+    const canAddBuySignal = (currentIdx: number, currentPrice: number): boolean => {
+      for (const sig of signalRecords) {
+        const daysDiff = currentIdx - sig.index;
+        if (daysDiff <= 0) continue;
+        
+        if (sig.type === 'B') {
+          // 规则1: B之后检查B
+          if (daysDiff <= 5) {
+            const dropPct = (sig.price - currentPrice) / sig.price * 100;
+            if (dropPct < 5) return false;
+          } else if (daysDiff <= 10) {
+            const dropPct = (sig.price - currentPrice) / sig.price * 100;
+            if (dropPct < 10) return false;
+          }
+        } else if (sig.type === 'S') {
+          // 规则3: S之后检查B
+          if (daysDiff <= 5) {
+            const dropPct = (sig.price - currentPrice) / sig.price * 100;
+            if (dropPct < 5) return false;
+          } else if (daysDiff <= 10) {
+            const dropPct = (sig.price - currentPrice) / sig.price * 100;
+            if (dropPct < 10) return false;
+          }
+        }
+      }
+      return true;
+    };
+    
+    // 检查是否可以添加S信号
+    const canAddSellSignal = (currentIdx: number, currentPrice: number): boolean => {
+      for (const sig of signalRecords) {
+        const daysDiff = currentIdx - sig.index;
+        if (daysDiff <= 0) continue;
+        
+        if (sig.type === 'S') {
+          // 规则2: S之后检查S
+          if (daysDiff <= 5) {
+            const risePct = (currentPrice - sig.price) / sig.price * 100;
+            if (risePct < 5) return false;
+          } else if (daysDiff <= 10) {
+            const risePct = (currentPrice - sig.price) / sig.price * 100;
+            if (risePct < 10) return false;
+          }
+        }
+        // S信号后不影响另一个S（已在上面处理）
+      }
+      return true;
+    };
+    
+    // 添加信号到记录
+    const addSignalRecord = (index: number, price: number, type: 'B' | 'S') => {
+      signalRecords.push({ index, price, type });
+      // 保持记录按时间排序
+      signalRecords.sort((a, b) => a.index - b.index);
+    };
+    
     // 构建PVT背离标记点数据（平衡版阈值，收紧5pct）：
     // 顶背离(S)：连续2天及以上 + BIAS>50%（标注第一天，绿色S）
     // 底背离(B)：连续2天及以上 + 两天CRI>=60 + 两天成本偏离度分位数<15%（标注最后一天，红色B）
@@ -329,24 +394,29 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         if (!hasBottomMark) {
           const price = stockData[pivotIdx]?.low;
           if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端恐惧买入',
-              coord: [pivotIdx, price],
-              value: 'B',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'B',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#D946EF',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+            // 检查信号间隔规则
+            if (canAddBuySignal(pivotIdx, price)) {
+              pvtDivergenceMarks.push({
+                name: '极端恐惧买入',
+                coord: [pivotIdx, price],
+                value: 'B',
+                symbol: 'rect',
+                symbolSize: [14, 14],
+                itemStyle: { color: 'transparent' },
+                label: {
+                  show: true,
+                  formatter: 'B',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  color: '#D946EF',
+                  backgroundColor: 'rgba(22,27,34,0.85)',
+                  padding: [1, 3],
+                  borderRadius: 2,
+                },
+              });
+              // 记录信号用于后续过滤
+              addSignalRecord(pivotIdx, price, 'B');
+            }
           }
         }
       });
@@ -419,24 +489,29 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         if (!hasBottomMark) {
           const price = stockData[pivotIdx]?.low;
           if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端恐惧买入',
-              coord: [pivotIdx, price],
-              value: 'B',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'B',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#D946EF',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+            // 检查信号间隔规则
+            if (canAddBuySignal(pivotIdx, price)) {
+              pvtDivergenceMarks.push({
+                name: '极端恐惧买入',
+                coord: [pivotIdx, price],
+                value: 'B',
+                symbol: 'rect',
+                symbolSize: [14, 14],
+                itemStyle: { color: 'transparent' },
+                label: {
+                  show: true,
+                  formatter: 'B',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  color: '#D946EF',
+                  backgroundColor: 'rgba(22,27,34,0.85)',
+                  padding: [1, 3],
+                  borderRadius: 2,
+                },
+              });
+              // 记录信号用于后续过滤
+              addSignalRecord(pivotIdx, price, 'B');
+            }
           }
         }
       });
@@ -487,24 +562,29 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         if (!hasTopMark) {
           const price = stockData[pivotIdx]?.high;
           if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端贪婪卖出',
-              coord: [pivotIdx, price],
-              value: 'S',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'S',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#F97316',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+            // 检查信号间隔规则
+            if (canAddSellSignal(pivotIdx, price)) {
+              pvtDivergenceMarks.push({
+                name: '极端贪婪卖出',
+                coord: [pivotIdx, price],
+                value: 'S',
+                symbol: 'rect',
+                symbolSize: [14, 14],
+                itemStyle: { color: 'transparent' },
+                label: {
+                  show: true,
+                  formatter: 'S',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  color: '#F97316',
+                  backgroundColor: 'rgba(22,27,34,0.85)',
+                  padding: [1, 3],
+                  borderRadius: 2,
+                },
+              });
+              // 记录信号用于后续过滤
+              addSignalRecord(pivotIdx, price, 'S');
+            }
           }
         }
       });
@@ -552,24 +632,29 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         if (!hasTopMark) {
           const price = stockData[pivotIdx]?.high;
           if (price !== undefined) {
-            pvtDivergenceMarks.push({
-              name: '极端贪婪卖出',
-              coord: [pivotIdx, price],
-              value: 'S',
-              symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
-              label: {
-                show: true,
-                formatter: 'S',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: '#F97316',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
-              },
-            });
+            // 检查信号间隔规则
+            if (canAddSellSignal(pivotIdx, price)) {
+              pvtDivergenceMarks.push({
+                name: '极端贪婪卖出',
+                coord: [pivotIdx, price],
+                value: 'S',
+                symbol: 'rect',
+                symbolSize: [14, 14],
+                itemStyle: { color: 'transparent' },
+                label: {
+                  show: true,
+                  formatter: 'S',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  color: '#F97316',
+                  backgroundColor: 'rgba(22,27,34,0.85)',
+                  padding: [1, 3],
+                  borderRadius: 2,
+                },
+              });
+              // 记录信号用于后续过滤
+              addSignalRecord(pivotIdx, price, 'S');
+            }
           }
         }
       });
