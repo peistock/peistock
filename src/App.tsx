@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X } from 'lucide-react';
+import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X, Database, ChevronDown } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockChart from './components/StockChart';
 
@@ -7,7 +7,8 @@ import HelpDialog from './components/HelpDialog';
 import { calculateAllIndicators } from './utils/indicators';
 import { getMultiTimeframeData, getQuote, formatSymbol, getMarketName } from './utils/eastmoneyApi';
 import { getMultiTimeframeData as getTencentMultiData, getQuote as getTencentQuote } from './utils/tencentApi';
-import { getMultiTimeframeData as getBiyingMultiData, getQuote as getBiyingQuote, isAvailable as isBiyingAvailable } from './utils/biyingApi';
+// 必盈数据API暂不使用
+// import { getMultiTimeframeData as getBiyingMultiData, getQuote as getBiyingQuote, isAvailable as isBiyingAvailable } from './utils/biyingApi';
 import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -43,6 +44,10 @@ function App() {
   const [showEMAHS, setShowEMAHS] = useState(true);
   const [showMA, setShowMA] = useState(true);
   
+  // 数据源选择：auto=自动(东方财富优先), eastmoney=东方财富, tencent=腾讯财经
+  const [dataSource, setDataSource] = useState<'auto' | 'eastmoney' | 'tencent'>('auto');
+  const [showDataSourceDropdown, setShowDataSourceDropdown] = useState(false);
+  
   // 信号版本切换：严格版(默认) / 宽松版
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
   
@@ -66,6 +71,21 @@ function App() {
     localStorage.setItem('peter_stock_favorites', JSON.stringify(favorites));
   }, [favorites]);
   
+  // 点击外部关闭数据源下拉框
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-datasource-dropdown]')) {
+        setShowDataSourceDropdown(false);
+      }
+    };
+    
+    if (showDataSourceDropdown) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [showDataSourceDropdown]);
+  
   // 添加/移除收藏
   const toggleFavorite = useCallback((symbol: string, name: string) => {
     setFavorites(prev => {
@@ -87,45 +107,47 @@ function App() {
       let multiData, quote;
       let apiSource = '';
       
-      try {
-        // 尝试东方财富API
-        console.log('尝试东方财富API...');
+      // 根据数据源选择获取数据
+      if (dataSource === 'eastmoney') {
+        // 强制使用东方财富
+        console.log('使用东方财富API...');
         [multiData, quote] = await Promise.all([
           getMultiTimeframeData(symbol),
           getQuote(symbol),
         ]);
         apiSource = '东方财富数据';
         console.log('东方财富API成功');
-      } catch (eastmoneyErr: any) {
-        console.log('东方财富API失败:', eastmoneyErr.message || eastmoneyErr);
-        
-        // 东方财富失败，切换到腾讯财经API
+      } else if (dataSource === 'tencent') {
+        // 强制使用腾讯
+        console.log('使用腾讯财经API...');
+        [multiData, quote] = await Promise.all([
+          getTencentMultiData(symbol),
+          getTencentQuote(symbol),
+        ]);
+        apiSource = '腾讯财经';
+        console.log('腾讯财经API成功');
+      } else {
+        // auto模式：东方财富优先，失败自动切换腾讯
         try {
-          console.log('切换到腾讯财经API...');
+          console.log('自动模式：尝试东方财富API...');
           [multiData, quote] = await Promise.all([
-            getTencentMultiData(symbol),
-            getTencentQuote(symbol),
+            getMultiTimeframeData(symbol),
+            getQuote(symbol),
           ]);
-          apiSource = '腾讯财经';
-          console.log('腾讯财经API成功');
-        } catch (tencentErr: any) {
-          console.log('腾讯财经API失败:', tencentErr.message || tencentErr);
+          apiSource = '东方财富数据';
+          console.log('东方财富API成功');
+        } catch (eastmoneyErr: any) {
+          console.log('东方财富API失败，自动切换到腾讯财经:', eastmoneyErr.message || eastmoneyErr);
           
-          // 如果必盈数据配置了 licence，最后尝试必盈数据
-          if (isBiyingAvailable()) {
-            try {
-              console.log('切换到必盈数据API...');
-              [multiData, quote] = await Promise.all([
-                getBiyingMultiData(symbol),
-                getBiyingQuote(symbol),
-              ]);
-              apiSource = '必盈数据';
-              console.log('必盈数据API成功');
-            } catch (biyingErr: any) {
-              console.log('必盈数据API也失败:', biyingErr.message || biyingErr);
-              throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 腾讯: ${tencentErr.message || '失败'}; 必盈: ${biyingErr.message || '失败'}`);
-            }
-          } else {
+          try {
+            [multiData, quote] = await Promise.all([
+              getTencentMultiData(symbol),
+              getTencentQuote(symbol),
+            ]);
+            apiSource = '腾讯财经(自动切换)';
+            console.log('腾讯财经API成功');
+          } catch (tencentErr: any) {
+            console.log('腾讯财经API也失败:', tencentErr.message || tencentErr);
             throw new Error(`东方财富: ${eastmoneyErr.message || '失败'}; 腾讯: ${tencentErr.message || '失败'}`);
           }
         }
@@ -134,8 +156,8 @@ function App() {
       // 使用流通股本计算指标
       const capital = quote.capital;
       
-      // 根据API来源确定capital单位类型
-      const capitalUnit: 'shares' | 'ten_thousand_shares' = apiSource === '腾讯财经' ? 'shares' : 'ten_thousand_shares';
+      // 流通股本单位：两个API返回的都是"股"，不需要额外转换
+      const capitalUnit: 'shares' | 'ten_thousand_shares' = 'shares';
       
       // 为每个时间维度计算指标
       setTimeframeData({
@@ -276,6 +298,55 @@ function App() {
                         ))}
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+              
+              {/* 数据源选择器 */}
+              <div className="relative" data-datasource-dropdown>
+                <button 
+                  onClick={() => setShowDataSourceDropdown(!showDataSourceDropdown)}
+                  className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors"
+                >
+                  <Database className="w-4 h-4" />
+                  {dataSource === 'auto' ? '自动' : dataSource === 'eastmoney' ? '东方财富' : '腾讯'}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                
+                {showDataSourceDropdown && (
+                  <div className="absolute right-0 top-full mt-2 w-40 bg-[#161B22] border border-[#30363D] rounded-lg shadow-xl z-50">
+                    <div className="p-2">
+                      <button
+                        onClick={() => { setDataSource('auto'); setShowDataSourceDropdown(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm rounded ${dataSource === 'auto' ? 'bg-[#FF3435]/20 text-white' : 'text-[#8B949E] hover:bg-[#0D1117]'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>自动切换</span>
+                          {dataSource === 'auto' && <span className="text-[#FF3435]">●</span>}
+                        </div>
+                        <div className="text-xs text-[#8B949E] mt-0.5">东方财富优先</div>
+                      </button>
+                      <button
+                        onClick={() => { setDataSource('eastmoney'); setShowDataSourceDropdown(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm rounded mt-1 ${dataSource === 'eastmoney' ? 'bg-[#FF3435]/20 text-white' : 'text-[#8B949E] hover:bg-[#0D1117]'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>东方财富</span>
+                          {dataSource === 'eastmoney' && <span className="text-[#FF3435]">●</span>}
+                        </div>
+                        <div className="text-xs text-[#8B949E] mt-0.5">A股数据较全</div>
+                      </button>
+                      <button
+                        onClick={() => { setDataSource('tencent'); setShowDataSourceDropdown(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm rounded mt-1 ${dataSource === 'tencent' ? 'bg-[#FF3435]/20 text-white' : 'text-[#8B949E] hover:bg-[#0D1117]'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span>腾讯财经</span>
+                          {dataSource === 'tencent' && <span className="text-[#FF3435]">●</span>}
+                        </div>
+                        <div className="text-xs text-[#8B949E] mt-0.5">港股数据较好</div>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

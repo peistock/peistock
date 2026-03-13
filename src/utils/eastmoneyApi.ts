@@ -94,8 +94,8 @@ export async function getQuote(symbol: string): Promise<{
   // f57: 股票代码
   // f58: 股票名称
   // f60: 昨收(乘以0.01)
-  // f84: 总股本(万股)
-  // f85: 流通股本(万股)
+  // f84: 总股本(股) - 实测直接返回股数
+  // f85: 流通股本(股) - 实测直接返回股数
   // f170: 涨跌幅
   
   // 港股(secid以116.开头)价格需要除以1000，A股除以100
@@ -107,13 +107,8 @@ export async function getQuote(symbol: string): Promise<{
   const change = price - prevClose;
   const changePercent = d.f170 || 0;
   
-  // f85: 流通股本
-  // 东方财富 API 中，A股的 f85 是"万股"，港股可能直接是"股"
-  // 判断逻辑：如果 f85 < 1000万，认为是万股需要转换；否则已经是股
-  const f85Value = d.f85 || 0;
-  // 600989 流通盘约 73 亿股 = 733360万股，f85 应该返回 733360 左右
-  // 如果 f85 返回 7333600000，说明已经是股
-  const capital = f85Value < 10000000 ? f85Value * 10000 : f85Value;
+  // f85: 流通股本(股) - 实测直接返回股数
+  const capital = d.f85 || 0;
   
   return {
     symbol: d.f57 || symbol,
