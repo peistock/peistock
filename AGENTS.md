@@ -32,10 +32,20 @@
 - **斜率因子**: MA20/60/225未来5日斜率
 - **趋势强度**: 5级分类 (strong_bull/bull/neutral/bear/strong_bear)
 
-#### 2. 信号系统 (src/App.tsx)
-- **机会信号**: 基于低位分位数/趋势回调
-- **风险信号**: 基于高位分位数/CRI/斜率压力
-- **状态机**: panic/trend_down/overbought/normal
+#### 2. 信号系统
+
+**前端展示信号** (`src/App.tsx` → `detectSignalsFrontend`):
+- 机会信号：基于低位分位数/趋势回调
+- 风险信号：基于高位分位数/CRI/斜率压力
+- 状态机：panic/trend_down/overbought/normal
+- 产生分析性提示（如"BIAS低于历史80%"、"CRI高位"等），**不直接用于交易决策**
+
+**严格 B/S 信号** (`src/utils/signals.ts` → `detectSignals`):
+- **B(底背离)**: 连续≥2天底背离 + CRI≥60有2天 + 成本偏离<15%有2天
+- **B(恐慌)**: 成本偏离<5% + BIAS<5% + CRI>90
+- **S(顶背离)**: 连续≥2天顶背离 + BIAS>50%
+- **S(贪婪)**: 贪婪>95% + BIAS>90%
+- **这是雪球大V同款标准，邮件/扫描报告只使用此信号**
 
 #### 3. 动态阈值机制（2025-02-26更新）
 ```
@@ -70,6 +80,16 @@
 - CRI分位<70%（未极端恐慌）
 - 成交量萎缩（VR<0.8）
 - 显示: "趋势回调·MA20支撑 - 关注买入"
+
+### 每日扫描脚本 (scripts/daily-watchlist-scan.ts)
+
+**核心逻辑**: 使用 `detectSignals`（严格B/S），**不使用** `detectSignalsFrontend`。
+
+**输入模式**:
+- 无参数：扫描默认 `getUniqueWatchlist()`（154只）
+- CSV路径：扫描 CSV 中的股票（如 xueqiu_tracker 导出的大V共同关注股票）
+
+**输出过滤**: 只有 `strictSignalType !== null` 的股票才会进入邮件/Excel/控制台输出。
 
 ### 关键设计原则
 

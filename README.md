@@ -1,73 +1,50 @@
-# React + TypeScript + Vite
+# Peter 趋势交易系统 (peistock)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+基于量价均线分析的股票趋势交易系统，包含前端可视化 + 后端信号扫描。
 
-Currently, two official plugins are available:
+## 功能概览
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **K线图表**：React + ECharts，集成多种技术指标
+- **信号检测**：严格 B/S 交易信号（底背离/顶背离/恐慌/贪婪/高估）
+- **每日扫描**：工作日自动扫描股票池，邮件推送信号
+- **大V追踪**：与 xueqiu_tracker 联动，扫描雪球大V共同关注股票
 
-## React Compiler
+## 快速开始
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd "/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock"
+npm install
+npm run dev      # 本地开发服务器 http://localhost:5173
+npm run build    # 生产构建
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 每日扫描
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# 扫描默认股票池（154只）
+npx tsx scripts/daily-watchlist-scan.ts
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 扫描大V共同关注股票（从 xueqiu_tracker CSV）
+npx tsx scripts/daily-watchlist-scan.ts \
+  "/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/xueqiu_tracker/data/大V共同关注股票分析.csv"
 ```
+
+详见 [DAILY_SCAN.md](DAILY_SCAN.md)。
+
+## 项目结构
+
+```
+src/
+  data/watchlist.ts       # 默认股票池
+  utils/indicators.ts     # 指标计算（CRI/贪婪/BIAS等）
+  utils/signals.ts        # 严格B/S信号检测
+  App.tsx                 # 主界面
+scripts/
+  daily-watchlist-scan.ts # 每日扫描主脚本
+```
+
+## 技术栈
+
+- React + TypeScript + Vite
+- Tailwind CSS + shadcn/ui
+- ECharts

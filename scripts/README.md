@@ -1,11 +1,15 @@
 # 股票信号扫描工具
 
-批量扫描股票列表，自动检测 S/B 交易信号，输出 Excel 报告。
+批量扫描股票列表，自动检测严格 B/S 交易信号，输出 Excel 报告。
 
 ## 使用方法
 
 ### 1. 准备股票列表
 
+模式 A - 使用默认关注列表（154只）：
+直接运行脚本，无需准备文件。
+
+模式 B - 从 Excel 扫描：
 创建一个 Excel 文件，格式如下：
 
 | code | name |
@@ -18,20 +22,27 @@
 - **第一列**: 股票代码（5位港股或6位A股）
 - **第二列**: 股票名称（可选）
 
-### 2. 运行扫描
+模式 C - 从 CSV 扫描（推荐，用于 xueqiu_tracker 集成）：
+CSV 格式：第一列为 `code` 列，支持 `SH600519`、`600519` 等格式。
 
 ```bash
-npx tsx scripts/scan-signals.ts <输入文件> [输出文件]
+npx tsx scripts/daily-watchlist-scan.ts /path/to/stocks.csv
 ```
 
-**示例:**
+### 2. 运行扫描
 
+**daily-watchlist-scan.ts**（推荐，支持邮件/QQ推送）：
 ```bash
-# 使用默认输出文件名 (signals_YYYY-MM-DD.xlsx)
-npx tsx scripts/scan-signals.ts my_stocks.xlsx
+# 扫描默认关注列表
+npx tsx scripts/daily-watchlist-scan.ts
 
-# 指定输出文件名
-npx tsx scripts/scan-signals.ts my_stocks.xlsx results.xlsx
+# 扫描 CSV 文件
+npx tsx scripts/daily-watchlist-scan.ts stocks.csv
+```
+
+**scan-signals.ts**（通用扫描，Excel输入）：
+```bash
+npx tsx scripts/scan-signals.ts input.xlsx [output.xlsx]
 ```
 
 ### 3. 查看结果
@@ -51,32 +62,36 @@ npx tsx scripts/scan-signals.ts my_stocks.xlsx results.xlsx
 | 贪婪指数 | 贪婪指数 |
 | 错误信息 | 如有错误显示于此 |
 
-## 信号说明
+## 信号说明（严格 B/S 标准）
 
 | 信号 | 条件 | 颜色 | 标记位置 |
 |------|------|------|----------|
 | S(顶背离) | 连续≥2天顶背离 + BIAS>50% | 🟢 绿色 | 第一天 |
 | S(贪婪) | 贪婪>95% + BIAS>90% | 🟠 橙色 | DI拐点 |
-| B(底背离) | 连续≥2天底背离 + 2×CRI≥60 + 2×成本偏离<50% | 🔴 红色 | 最后一天 |
+| B(底背离) | 连续≥2天底背离 + 2×CRI≥60 + 2×成本偏离<15% | 🔴 红色 | 最后一天 |
 | B(恐慌) | 成本偏离<5% + BIAS<5% + CRI>90 | 🟣 紫色 | DI拐点 |
+
+> 这是雪球大V同款严格标准。`daily-watchlist-scan.ts` 只输出满足上述条件的股票，过滤掉前端展示的分析性提示。
 
 ## 定时自动运行（macOS/Linux）
 
-### 使用 cron 每天收盘后自动扫描
+### 使用 cron 每天自动扫描
 
 1. 编辑 crontab：
 ```bash
 crontab -e
 ```
 
-2. 添加定时任务（每天 16:00 运行，收盘后）：
+2. 添加定时任务（每天 12:00 运行）：
 ```bash
-# 每天 16:00 扫描
-0 16 * * 1-5 cd /Users/cpp/Downloads/app && /usr/local/bin/npx tsx scripts/scan-signals.ts /path/to/stocks.xlsx /path/to/signals_$(date +\%Y-\%m-\%d).xlsx >> /path/to/scan.log 2>&1
+# 扫描默认列表
+0 12 * * 1-5 cd "/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock" && /opt/homebrew/bin/npx tsx scripts/daily-watchlist-scan.ts >> logs/daily-scan.log 2>&1
+
+# 扫描大V CSV
+0 12 * * 1-5 cd "/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock" && /opt/homebrew/bin/npx tsx scripts/daily-watchlist-scan.ts "/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/xueqiu_tracker/data/大V共同关注股票分析.csv" >> logs/daily-scan.log 2>&1
 ```
 
 **注意**: 
-- 修改路径为你实际的文件路径
 - macOS 上 npx 路径可能不同，可用 `which npx` 查看
 - 工作日 1-5 表示周一到周五
 
@@ -93,24 +108,60 @@ crontab -e
     <string>com.user.stockscan</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/npx</string>
+        <string>/opt/homebrew/bin/npx</string>
         <string>tsx</string>
-        <string>/Users/cpp/Downloads/app/scripts/scan-signals.ts</string>
-        <string>/path/to/stocks.xlsx</string>
+        <string>/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock/scripts/daily-watchlist-scan.ts</string>
+        <string>/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/xueqiu_tracker/data/大V共同关注股票分析.csv</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock</string>
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>16</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-        <key>Weekday</key>
-        <integer>1</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Weekday</key>
+            <integer>1</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Weekday</key>
+            <integer>2</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Weekday</key>
+            <integer>3</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Weekday</key>
+            <integer>4</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>12</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+            <key>Weekday</key>
+            <integer>5</integer>
+        </dict>
+    </array>
     <key>StandardOutPath</key>
-    <string>/path/to/scan.log</string>
+    <string>/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock/logs/daily-scan.log</string>
     <key>StandardErrorPath</key>
-    <string>/path/to/scan_error.log</string>
+    <string>/Users/peter/Library/Mobile Documents/com~apple~CloudDocs/操作系统/peistock/logs/daily-scan-error.log</string>
 </dict>
 </plist>
 ```

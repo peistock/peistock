@@ -659,7 +659,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         }
       });
     }
-    
+
     // 构建抵扣价markPoint数据
     const deductMarkPoints: echarts.MarkPointComponentOption['data'] = [];
     
