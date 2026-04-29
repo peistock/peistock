@@ -193,7 +193,7 @@ export function detectSignalsSimple(
   const t = XUEQIU_THRESHOLDS;
 
   // B(恐慌): 成本偏离<5% + BIAS<5% + CRI>90
-  if (costDevPct !== null && bias225Pct !== null && cri !== null) {
+  if (costDevPct != null && bias225Pct != null && cri != null) {
     if (costDevPct < t.buyCostDev && bias225Pct < t.buyBias && cri > t.buyCRI) {
       signals.push('B(恐慌)');
       signalType = 'B';
@@ -326,7 +326,7 @@ export function detectSignalsFrontend(
   }
 
   // 成本差穿越零轴信号
-  if (last.costDiff !== null && prev?.costDiff !== null) {
+  if (prev !== undefined && last.costDiff !== null && prev.costDiff !== null) {
     if (last.costDiff > 0 && prev.costDiff <= 0) {
       buySignals.push('成本差上穿零轴 - 短期转强');
     }
