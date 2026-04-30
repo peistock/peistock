@@ -57,6 +57,15 @@ export interface ExtendedSignalData extends SignalData {
   recentDivergences?: ('none' | 'top' | 'bottom' | null)[];
   recentCRI?: (number | null)[];
   recentCostDev?: (number | null)[];
+  // DI 数据（用于 B(恐慌)/S(贪婪) 的 DI 拐点判断，与前端 K 线一致）
+  plusDI?: number | null;
+  minusDI?: number | null;
+  // 前一天的 DI 数据（用于找拐点）
+  prevPlusDI?: number | null;
+  prevMinusDI?: number | null;
+  // 后一天的 DI 数据（用于找拐点）
+  nextPlusDI?: number | null;
+  nextMinusDI?: number | null;
 }
 
 export interface SignalResult {
@@ -115,26 +124,48 @@ export function detectSignals(
     recentDivergences = [],
     recentCRI = [],
     recentCostDev = [],
+    plusDI,
+    minusDI,
+    prevPlusDI,
+    prevMinusDI,
+    nextPlusDI,
+    nextMinusDI,
   } = data;
 
   const t = XUEQIU_THRESHOLDS;
+
+  // DI 拐点判断（与前端 K 线 B/S 标记一致）
+  // B(恐慌) 在 -DI 峰值 或 +DI 谷值标记
+  const isDIPivotForPanic = (
+    (prevMinusDI != null && minusDI != null && nextMinusDI != null &&
+      minusDI > prevMinusDI && minusDI > nextMinusDI) ||
+    (prevPlusDI != null && plusDI != null && nextPlusDI != null &&
+      plusDI < prevPlusDI && plusDI < nextPlusDI)
+  );
+  // S(贪婪) 在 +DI 峰值 或 -DI 谷值标记
+  const isDIPivotForGreedy = (
+    (prevPlusDI != null && plusDI != null && nextPlusDI != null &&
+      plusDI > prevPlusDI && plusDI > nextPlusDI) ||
+    (prevMinusDI != null && minusDI != null && nextMinusDI != null &&
+      minusDI < prevMinusDI && minusDI < nextMinusDI)
+  );
 
   // ===== 买入信号 =====
 
   // B(底背离): 连续≥2天底背离 + CRI≥60有2天 + 成本偏离<50%有2天
   if (useDivergence && recentDivergences.length > 0) {
     const bottomDivCount = countConsecutiveDivergences(recentDivergences, 'bottom');
-    
+
     if (bottomDivCount >= DIVERGENCE_BUY.consecutiveDays) {
       // 检查最近N天中CRI≥60的天数
       const recentDays = Math.min(bottomDivCount, recentCRI.length);
       const recentCRISlice = recentCRI.slice(-recentDays);
       const criMeetingCount = countRecentMeetings(recentCRISlice, v => v >= DIVERGENCE_BUY.criMin);
-      
+
       // 检查最近N天中成本偏离<50%的天数
       const recentCostDevSlice = recentCostDev.slice(-recentDays);
       const costDevMeetingCount = countRecentMeetings(recentCostDevSlice, v => v < DIVERGENCE_BUY.costDevMax);
-      
+
       if (criMeetingCount >= 2 && costDevMeetingCount >= 2) {
         signals.push(`B(底背离${bottomDivCount}天)`);
         signalType = 'B';
@@ -142,14 +173,17 @@ export function detectSignals(
     }
   }
 
-  // B(恐慌): 成本偏离<5% + BIAS<5% + CRI>90
+  // B(恐慌): 成本偏离<5% + BIAS<5% + CRI>90，且为 DI 拐点（与前端 K 线一致）
   const isCostDevPanic = costDev !== null && costDev < t.buyCostDev;
   const isBiasPanic = bias !== null && bias < t.buyBias;
   const isCRIPanic = cri !== null && cri > t.buyCRI;
 
   if (isCostDevPanic && isBiasPanic && isCRIPanic) {
-    signals.push('B(恐慌)');
-    signalType = 'B';
+    // 底背离不判断 DI 拐点；B(恐慌) 只在 DI 拐点标记
+    if (signalType === 'B' || isDIPivotForPanic) {
+      signals.push('B(恐慌)');
+      signalType = 'B';
+    }
   }
 
   // ===== 卖出信号 =====
@@ -158,20 +192,23 @@ export function detectSignals(
   if (useDivergence && recentDivergences.length > 0) {
     const topDivCount = countConsecutiveDivergences(recentDivergences, 'top');
     const isBiasHigh = bias !== null && bias > DIVERGENCE_SELL.biasMin;
-    
+
     if (topDivCount >= DIVERGENCE_SELL.consecutiveDays && isBiasHigh) {
       signals.push(`S(顶背离${topDivCount}天)`);
       signalType = 'S';
     }
   }
 
-  // S(贪婪): 贪婪>95% + BIAS>90%
+  // S(贪婪): 贪婪>95% + BIAS>90%，且为 DI 拐点（与前端 K 线一致）
   const isGreedyHigh = greedy !== null && greedy > t.sellGreedy;
   const isBiasSellHigh = bias !== null && bias > t.sellBias;
 
   if (isGreedyHigh && isBiasSellHigh) {
-    signals.push('S(贪婪)');
-    signalType = 'S';
+    // 顶背离不判断 DI 拐点；S(贪婪) 只在 DI 拐点标记
+    if (signalType === 'S' || isDIPivotForGreedy) {
+      signals.push('S(贪婪)');
+      signalType = 'S';
+    }
   }
 
   return { signals, signalType };
