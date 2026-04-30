@@ -30,6 +30,8 @@ interface StockSearchProps {
   // 信号版本切换
   signalVersion?: 'strict' | 'loose';
   onToggleSignalVersion?: () => void;
+  // 股票池插槽
+  pool?: React.ReactNode;
 }
 
 // 最近搜索存储键
@@ -42,10 +44,11 @@ interface RecentSearch {
   timestamp: number;
 }
 
-const StockSearch = ({ 
+const StockSearch = ({
   onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
   showMAHS, onToggleMAHS, showEMAHS, onToggleEMAHS, showMA, onToggleMA,
-  signalVersion = 'strict', onToggleSignalVersion
+  signalVersion = 'strict', onToggleSignalVersion,
+  pool
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
@@ -157,6 +160,9 @@ const StockSearch = ({
           </button>
         </div>
       )}
+
+      {/* 股票池 */}
+      {pool}
 
       {/* Stock info */}
       {stockInfo && (

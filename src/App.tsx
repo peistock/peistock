@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X, Database, ChevronDown } from 'lucide-react';
 import StockSearch from './components/StockSearch';
+import StockPool from './components/StockPool';
 import StockChart from './components/StockChart';
 
 import HelpDialog from './components/HelpDialog';
@@ -372,9 +373,9 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         {/* Search Section */}
         <section className="mb-6">
-          <StockSearch 
-            onSearch={handleSearch} 
-            loading={loading} 
+          <StockSearch
+            onSearch={handleSearch}
+            loading={loading}
             stockInfo={stockInfo}
             isFavorite={stockInfo ? favorites.some(f => f.symbol === stockInfo.symbol) : false}
             onToggleFavorite={stockInfo ? () => toggleFavorite(stockInfo.symbol, stockInfo.name) : undefined}
@@ -386,6 +387,7 @@ function App() {
             onToggleMA={setShowMA}
             signalVersion={signalVersion}
             onToggleSignalVersion={() => setSignalVersion(prev => prev === 'strict' ? 'loose' : 'strict')}
+            pool={<StockPool onSelect={handleSearch} />}
           />
         </section>
 
