@@ -79,17 +79,18 @@ export async function getKlines(
   }
   
   // 解析数据 [日期, 开盘, 收盘, 最低, 最高, 成交量]
-  // 腾讯A股返回的是"手"，港股返回的是"股"
+  // 腾讯主板/创业板A股返回的是"手"，科创板(688)返回的是"股"，港股返回的是"股"
   const isHK = tencentSymbol.startsWith('hk');
-  
+  const isKEB = cleanSymbol(symbol).startsWith('688'); // 科创板
+
   return klines.map((item: any) => ({
     date: item[0],
     open: parseFloat(item[1]) || 0,
     close: parseFloat(item[2]) || 0,
     low: parseFloat(item[3]) || 0,
     high: parseFloat(item[4]) || 0,
-    // A股成交量是手，需要×100换算成股；港股直接是股
-    volume: isHK ? parseInt(item[5]) || 0 : (parseInt(item[5]) || 0) * 100,
+    // A股成交量：主板/创业板是手(×100)，科创板是股(不×100)，港股是股
+    volume: isHK || isKEB ? parseInt(item[5]) || 0 : (parseInt(item[5]) || 0) * 100,
     amount: 0, // 腾讯 API 不直接提供成交额
   }));
 }
@@ -234,13 +235,17 @@ export async function getMinKlines(
   const minData = result.data[tencentSymbol];
   const klines = minData.data || [];
   
+  // 科创板(688)成交量单位是股，其他是手
+  const isKEB = cleanSymbol(symbol).startsWith('688');
+
   return klines.map((item: any) => ({
     date: item[0], // 时间格式: YYYYMMDDHHMM
     open: parseFloat(item[1]) || 0,
     close: parseFloat(item[2]) || 0,
     high: parseFloat(item[3]) || 0,
     low: parseFloat(item[4]) || 0,
-    volume: parseInt(item[5]) || 0,
+    // 科创板成交量是股，其他A股是手(×100)
+    volume: isKEB ? parseInt(item[5]) || 0 : (parseInt(item[5]) || 0) * 100,
     amount: 0,
   }));
 }
@@ -258,6 +263,7 @@ function cleanSymbol(symbol: string): string {
 export function getMarketName(symbol: string): string {
   const clean = cleanSymbol(symbol);
   if (clean.length === 5) return '港股';
+  if (clean.startsWith('688')) return '科创板';
   if (clean.startsWith('6')) return '上证';
   if (clean.startsWith('3')) return '创业板';
   if (clean.startsWith('0')) return '深证';

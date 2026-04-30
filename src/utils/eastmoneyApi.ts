@@ -208,13 +208,16 @@ export function formatSymbol(input: string): string {
 export function getMarketName(symbol: string): string {
   const code = formatSymbol(symbol);
   const numCode = parseInt(code);
-  
+
   // 港股
   if (code.length === 5) return '香港';
-  
+
+  // 科创板
+  if (code.startsWith('688')) return '科创板';
+
   // 上海
-  if (numCode >= 600000 || numCode >= 688000) return '上海';
-  
+  if (numCode >= 600000) return '上海';
+
   // 深圳
   return '深圳';
 }

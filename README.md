@@ -5,7 +5,8 @@
 ## 功能概览
 
 - **K线图表**：React + ECharts，集成多种技术指标
-- **信号检测**：严格 B/S 交易信号（底背离/顶背离/恐慌/贪婪/高估）
+- **股票池**：154只关注股票分类面板，支持按行业筛选和快速跳转
+- **信号检测**：严格 B/S 交易信号（底背离/顶背离/恐慌/贪婪）
 - **每日扫描**：工作日自动扫描股票池，邮件推送信号
 - **大V追踪**：与 xueqiu_tracker 联动，扫描雪球大V共同关注股票
 
@@ -35,7 +36,9 @@ npx tsx scripts/daily-watchlist-scan.ts \
 
 ```
 src/
-  data/watchlist.ts       # 默认股票池
+  data/watchlist.ts       # 默认股票池（154只，按行业分类）
+  components/StockPool.tsx # 股票池分类筛选面板
+  components/StockSearch.tsx # 股票搜索组件
   utils/indicators.ts     # 指标计算（CRI/贪婪/BIAS等）
   utils/signals.ts        # 严格B/S信号检测
   App.tsx                 # 主界面

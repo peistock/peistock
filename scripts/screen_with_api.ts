@@ -55,7 +55,8 @@ async function screenStock(stock: typeof TEST_STOCKS[0]): Promise<ScreenResult |
     }
     
     // 使用项目中的完整指标计算
-    const indicators = calculateAllIndicators(klineData, stock.capital);
+    // stock.capital 单位是股，需要显式传入 'shares'
+    const indicators = calculateAllIndicators(klineData, stock.capital, 'shares');
     const lastIndicator = indicators[indicators.length - 1];
     
     if (!lastIndicator || lastIndicator.cri === null) {
