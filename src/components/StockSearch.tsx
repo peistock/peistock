@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Star, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Star, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { formatCapital } from '@/utils/indicators';
@@ -51,6 +51,27 @@ const StockSearch = ({
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+  const [currentCard, setCurrentCard] = useState(0);
+
+  // 报告按 ## 标题拆分为卡片
+  const sections = useMemo(() => {
+    if (!aiReport) return [];
+    const matches = [...aiReport.matchAll(/^## .+$/gm)];
+    if (matches.length === 0) return [{ title: '报告', content: aiReport }];
+    return matches.map((m, i) => {
+      const start = m.index!;
+      const end = i < matches.length - 1 ? matches[i + 1].index! : aiReport.length;
+      const content = aiReport.slice(start, end).trim();
+      const titleMatch = content.match(/^## (.+)$/m);
+      const title = titleMatch ? titleMatch[1].trim() : '未命名';
+      return { title, content };
+    });
+  }, [aiReport]);
+
+  // 新报告载入时重置到第一张卡片
+  useEffect(() => {
+    setCurrentCard(0);
+  }, [aiReport]);
 
   // 从 localStorage 加载最近搜索
   useEffect(() => {
@@ -286,8 +307,87 @@ const StockSearch = ({
           </button>
           {showReport && (
             <div className="px-4 py-3 border-t border-[#30363D]">
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown>{aiReport}</ReactMarkdown>
+              {/* 卡片轮播 */}
+              <div className="relative">
+                {/* 左右箭头 */}
+                <button
+                  onClick={() => setCurrentCard(prev => Math.max(0, prev - 1))}
+                  disabled={currentCard === 0}
+                  className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-white hover:border-[#FF3435] transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setCurrentCard(prev => Math.min(sections.length - 1, prev + 1))}
+                  disabled={currentCard === sections.length - 1}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-white hover:border-[#FF3435] transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                {/* 卡片内容区 */}
+                <div className="overflow-hidden mx-6">
+                  <div
+                    className="flex transition-transform duration-300 ease-out"
+                    style={{ transform: `translateX(-${currentCard * 100}%)` }}
+                  >
+                    {sections.map((section, i) => (
+                      <div key={i} className="w-full flex-shrink-0 min-h-[200px] max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
+                        <div className="max-w-none">
+                          <ReactMarkdown
+                            components={{
+                              h1: ({ children }) => <h3 className="text-[15px] font-bold text-white mt-2 mb-2 border-b border-[#30363D] pb-1">{children}</h3>,
+                              h2: ({ children }) => <h4 className="text-[13px] font-bold text-[#C9D1D9] mt-3 mb-1.5">{children}</h4>,
+                              h3: ({ children }) => <h5 className="text-[13px] font-semibold text-[#8B949E] mt-2 mb-1">{children}</h5>,
+                              p: ({ children }) => <p className="text-[13px] text-[#C9D1D9] leading-relaxed mb-2">{children}</p>,
+                              ul: ({ children }) => <ul className="list-disc list-inside text-[13px] text-[#C9D1D9] mb-2 space-y-0.5">{children}</ul>,
+                              ol: ({ children }) => <ol className="list-decimal list-inside text-[13px] text-[#C9D1D9] mb-2 space-y-0.5">{children}</ol>,
+                              li: ({ children }) => <li className="text-[13px] text-[#C9D1D9]">{children}</li>,
+                              strong: ({ children }) => <strong className="text-[#E3B341] font-semibold">{children}</strong>,
+                              em: ({ children }) => <em className="text-[#D2A8FF]">{children}</em>,
+                              code: ({ children }) => <code className="bg-[#0D1117] px-1 py-0.5 rounded text-[12px] text-[#FF3435] font-mono">{children}</code>,
+                              pre: ({ children }) => <pre className="bg-[#0D1117] p-2 rounded-lg overflow-x-auto text-[12px] text-[#C9D1D9] font-mono mb-2">{children}</pre>,
+                              blockquote: ({ children }) => <blockquote className="border-l-2 border-[#FF3435] pl-3 py-1 my-2 bg-[#0D1117]/50 text-[13px] text-[#8B949E] italic">{children}</blockquote>,
+                              table: ({ children }) => <table className="w-full text-[12px] text-[#C9D1D9] border border-[#30363D] mb-2">{children}</table>,
+                              thead: ({ children }) => <thead className="bg-[#0D1117] text-[#8B949E] text-[11px]">{children}</thead>,
+                              tbody: ({ children }) => <tbody>{children}</tbody>,
+                              tr: ({ children }) => <tr className="border-b border-[#30363D]">{children}</tr>,
+                              th: ({ children }) => <th className="px-2 py-1 text-left font-medium border-r border-[#30363D] last:border-r-0">{children}</th>,
+                              td: ({ children }) => <td className="px-2 py-1 border-r border-[#30363D] last:border-r-0">{children}</td>,
+                              hr: () => <hr className="border-[#30363D] my-3" />,
+                            }}
+                          >
+                            {section.content}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 底部章节指示器 */}
+              <div className="mt-3 flex items-center justify-center gap-1">
+                {sections.map((section, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setCurrentCard(i)}
+                    className={`h-1.5 rounded-full transition-all duration-200 ${
+                      i === currentCard ? 'w-6 bg-[#FF3435]' : 'w-1.5 bg-[#30363D] hover:bg-[#8B949E]'
+                    }`}
+                    title={section.title}
+                  />
+                ))}
+              </div>
+
+              {/* 章节标题 + 页码 */}
+              <div className="mt-2 text-center">
+                <div className="text-xs text-[#8B949E]">
+                  {currentCard + 1} / {sections.length}
+                </div>
+                <div className="text-[11px] text-[#8B949E] mt-0.5 truncate px-8">
+                  {sections[currentCard]?.title}
+                </div>
               </div>
             </div>
           )}

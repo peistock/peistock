@@ -152,8 +152,8 @@ export async function getQuote(symbol: string): Promise<{
   let capital = 0;
   
   if (market === '100') {
-    // 港股：索引 69 是流通股本（股）
-    capital = parseInt(stockQt[69]) || 0;
+    // 港股：索引 70 是流通股本（股），索引 69 是总股本
+    capital = parseInt(stockQt[70]) || 0;
   } else {
     // A股：索引 72 是流通股本（股）
     capital = parseInt(stockQt[72]) || 0;

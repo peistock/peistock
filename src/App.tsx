@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
-import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X, Database, ChevronDown } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X, Database, ChevronDown, Loader2 } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockPool from './components/StockPool';
 import StockChart from './components/StockChart';
@@ -15,10 +15,23 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { submitAnalysisJob, getTaskStatus } from './utils/researchApi';
-
-
 // 时间维度类型
 type TimeframeType = 'daily' | 'weekly' | 'min15';
+
+// 后台分析任务
+interface BackgroundJob {
+  taskId: string;
+  code: string;
+  name: string;
+  status: 'queued' | 'running' | 'completed' | 'error';
+  progress: string;
+  decision?: string;
+  conviction?: number;
+  date?: string;
+  reportPreview?: string;
+  error?: string;
+  notified?: boolean;
+}
 
 interface TimeframeData {
   data: StockData[];
@@ -55,16 +68,25 @@ function App() {
   // 信号版本切换：严格版(默认) / 宽松版
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
 
-  // AI 投研分析
-  const [aiDecision, setAiDecision] = useState<{
-    decision: string;
-    conviction: number;
-    date: string;
-  } | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analyzeProgress, setAnalyzeProgress] = useState('');
-  const [aiReport, setAiReport] = useState<string | null>(null);
+  // AI 投研分析 — 后台多任务队列
+  const [backgroundJobs, setBackgroundJobs] = useState<Record<string, BackgroundJob>>({});
   const [showReport, setShowReport] = useState(false);
+  const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  // 当前股票的分析状态（从后台队列派生）
+  const currentJob = useMemo(() => {
+    if (!stockInfo) return null;
+    return backgroundJobs[stockInfo.symbol] || null;
+  }, [backgroundJobs, stockInfo]);
+
+  const analyzing = currentJob?.status === 'queued' || currentJob?.status === 'running' || false;
+  const analyzeProgress = currentJob?.progress || '';
+  const aiDecision = currentJob?.decision ? {
+    decision: currentJob.decision,
+    conviction: currentJob.conviction || 50,
+    date: currentJob.date || '',
+  } : null;
+  const aiReport = currentJob?.reportPreview || null;
 
   // 收藏功能 - 存储代码和名称
   interface FavoriteItem {
@@ -117,8 +139,6 @@ function App() {
     setLoading(true);
     setError(null);
     setCurrentSymbol(symbol);
-    setAiDecision(null);
-    setAiReport(null);
     setShowReport(false);
     
     try {
@@ -234,68 +254,128 @@ function App() {
     setShowFavorites(false);
   }, [handleSearch]);
 
-  // AI 投研分析（异步任务 + 轮询）
+  // AI 投研分析 — 提交任务到后台队列
   const handleAnalyze = useCallback(async () => {
     if (!stockInfo) return;
-    setAnalyzing(true);
-    setAnalyzeProgress('提交分析任务...');
+    const code = stockInfo.symbol;
+    const name = stockInfo.name;
+
+    // 如果已有进行中的任务，不重复提交
+    const existing = backgroundJobs[code];
+    if (existing?.status === 'queued' || existing?.status === 'running') {
+      return;
+    }
+
     setError(null);
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    setShowReport(false);
 
     try {
-      const job = await submitAnalysisJob(stockInfo.symbol, 'B');
+      const job = await submitAnalysisJob(code, 'B');
       if (!job.task_id) {
         throw new Error('未返回任务 ID');
       }
-      const taskId = job.task_id;
 
-      // 轮询查询任务状态
-      const checkStatus = async () => {
-        try {
-          const status = await getTaskStatus(taskId);
-          setAnalyzeProgress(status.progress || '分析中...');
-
-          if (status.status === 'completed') {
-            if (pollInterval) clearInterval(pollInterval);
-            const result = status.result;
-            const preview = result?.report_preview || '';
-            const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
-            let decision = 'neutral';
-            if (decisionMatch) {
-              const d = decisionMatch[1].toLowerCase();
-              if (d === 'long') decision = 'long';
-              else if (d === 'short') decision = 'short';
-            }
-            setAiDecision({
-              decision,
-              conviction: result?.conviction || 50,
-              date: result?.date || '',
-            });
-            setAiReport(preview || null);
-            setAnalyzing(false);
-          } else if (status.status === 'error') {
-            if (pollInterval) clearInterval(pollInterval);
-            setError(`AI分析失败: ${status.detail || '未知错误'}`);
-            setAnalyzing(false);
-          }
-          // queued / running 状态继续轮询
-        } catch (e: any) {
-          if (pollInterval) clearInterval(pollInterval);
-          console.error('轮询失败', e);
-          setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
-          setAnalyzing(false);
-        }
-      };
-
-      // 立即查一次，之后每 5 秒查一次
-      await checkStatus();
-      pollInterval = setInterval(checkStatus, 5000);
+      setBackgroundJobs(prev => ({
+        ...prev,
+        [code]: {
+          taskId: job.task_id,
+          code,
+          name,
+          status: 'queued',
+          progress: '提交分析任务...',
+        },
+      }));
     } catch (e: any) {
       console.error('AI分析失败', e);
       setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
-      setAnalyzing(false);
     }
-  }, [stockInfo]);
+  }, [stockInfo, backgroundJobs]);
+
+  // 后台轮询 — 独立于当前显示的股票
+  useEffect(() => {
+    const runningJobs = Object.values(backgroundJobs).filter(
+      job => (job.status === 'queued' || job.status === 'running') && !pollIntervalsRef.current[job.code]
+    );
+
+    for (const job of runningJobs) {
+      const checkStatus = async () => {
+        try {
+          const status = await getTaskStatus(job.taskId);
+
+          setBackgroundJobs(prev => {
+            const current = prev[job.code];
+            if (!current) return prev;
+            const updated = { ...prev };
+
+            if (status.status === 'completed') {
+              const preview = status.result?.report_preview || '';
+              const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
+              let decision = 'neutral';
+              if (decisionMatch) {
+                const d = decisionMatch[1].toLowerCase();
+                if (d === 'long') decision = 'long';
+                else if (d === 'short') decision = 'short';
+              }
+              updated[job.code] = {
+                ...current,
+                status: 'completed',
+                progress: '分析完成',
+                decision,
+                conviction: status.result?.conviction || 50,
+                date: status.result?.date || '',
+                reportPreview: preview,
+              };
+            } else if (status.status === 'error') {
+              updated[job.code] = {
+                ...current,
+                status: 'error',
+                progress: status.detail || '分析失败',
+                error: status.detail || '未知错误',
+              };
+            } else {
+              updated[job.code] = {
+                ...current,
+                status: status.status as 'queued' | 'running',
+                progress: status.progress || '分析中...',
+              };
+            }
+            return updated;
+          });
+        } catch (e: any) {
+          console.error('轮询失败', e);
+          setBackgroundJobs(prev => {
+            const current = prev[job.code];
+            if (!current) return prev;
+            return {
+              ...prev,
+              [job.code]: {
+                ...current,
+                status: 'error',
+                progress: e.message || '轮询失败',
+                error: e.message || '轮询失败',
+              },
+            };
+          });
+        }
+      };
+
+      checkStatus();
+      pollIntervalsRef.current[job.code] = setInterval(checkStatus, 5000);
+    }
+
+    // 清理已完成/失败任务的轮询
+    Object.entries(pollIntervalsRef.current).forEach(([code, interval]) => {
+      const job = backgroundJobs[code];
+      if (!job || (job.status !== 'queued' && job.status !== 'running')) {
+        clearInterval(interval);
+        delete pollIntervalsRef.current[code];
+      }
+    });
+
+    return () => {
+      Object.values(pollIntervalsRef.current).forEach(clearInterval);
+    };
+  }, [backgroundJobs]);
 
   // 检查是否有数据
   const hasData = timeframeData.daily && timeframeData.weekly && timeframeData.min15;
@@ -448,6 +528,64 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* 后台分析通知条 */}
+      {Object.values(backgroundJobs).filter(job =>
+        (job.status === 'running' || (job.status === 'completed' && !job.notified))
+        && job.code !== stockInfo?.symbol
+      ).length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 pt-3 space-y-2">
+          {Object.values(backgroundJobs)
+            .filter(job =>
+              (job.status === 'running' || (job.status === 'completed' && !job.notified))
+              && job.code !== stockInfo?.symbol
+            )
+            .map(job => (
+              <div key={job.code} className={`px-3 py-2 rounded-lg border text-sm flex items-center justify-between ${
+                job.status === 'running'
+                  ? 'bg-[#1C2128] border-[#30363D] text-[#8B949E]'
+                  : 'bg-[#03B172]/10 border-[#03B172]/30 text-[#03B172]'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {job.status === 'running' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <BarChart2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>{job.name} ({job.code}) {job.status === 'running' ? job.progress || '分析中...' : '分析完成'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {job.status === 'completed' && (
+                    <button
+                      onClick={() => {
+                        handleSearch(job.code);
+                        setShowReport(true);
+                        setBackgroundJobs(prev => ({
+                          ...prev,
+                          [job.code]: { ...prev[job.code], notified: true },
+                        }));
+                      }}
+                      className="text-xs px-2 py-1 rounded bg-[#03B172]/20 hover:bg-[#03B172]/30 text-[#03B172] transition-colors"
+                    >
+                      点击查看
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setBackgroundJobs(prev => ({
+                        ...prev,
+                        [job.code]: { ...prev[job.code], notified: true },
+                      }));
+                    }}
+                    className="text-[#8B949E] hover:text-white p-1"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
