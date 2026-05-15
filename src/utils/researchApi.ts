@@ -14,13 +14,18 @@ async function fetchJSON(path: string, options?: RequestInit) {
   return res.json();
 }
 
-/** 个股分析：触发 Bull/Bear/Chair 链 */
-export async function analyzeStock(code: string, signal: string = 'B') {
+/** 提交分析任务，返回 task_id */
+export async function submitAnalysisJob(code: string, signal: string = 'B') {
   return fetchJSON(`/analyze/stock/${code}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signal }),
   });
+}
+
+/** 轮询查询任务状态 */
+export async function getTaskStatus(taskId: string) {
+  return fetchJSON(`/tasks/${taskId}`);
 }
 
 /** 最近决策列表 */

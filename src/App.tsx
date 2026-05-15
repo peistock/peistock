@@ -14,7 +14,7 @@ import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { analyzeStock } from './utils/researchApi';
+import { submitAnalysisJob, getTaskStatus } from './utils/researchApi';
 
 
 // 时间维度类型
@@ -62,6 +62,7 @@ function App() {
     date: string;
   } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState('');
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
 
@@ -233,36 +234,65 @@ function App() {
     setShowFavorites(false);
   }, [handleSearch]);
 
-  // AI 投研分析
+  // AI 投研分析（异步任务 + 轮询）
   const handleAnalyze = useCallback(async () => {
     if (!stockInfo) return;
     setAnalyzing(true);
-    try {
-      const result = await analyzeStock(stockInfo.symbol, 'B');
-      if (result.status === 'completed') {
-        const preview = result.report_preview || '';
-        // 精确提取 ## 决策（Decision）后面的决策值，避免全文关键词误判
-        const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
-        let decision = 'neutral';
-        if (decisionMatch) {
-          const d = decisionMatch[1].toLowerCase();
-          if (d === 'long') decision = 'long';
-          else if (d === 'short') decision = 'short';
-        }
+    setAnalyzeProgress('提交分析任务...');
+    setError(null);
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-        setAiDecision({
-          decision,
-          conviction: result.conviction || 50,
-          date: result.date,
-        });
-        setAiReport(result.report_preview || null);
-      } else {
-        setError(`AI分析失败: ${result.detail || '未知错误'}`);
+    try {
+      const job = await submitAnalysisJob(stockInfo.symbol, 'B');
+      if (!job.task_id) {
+        throw new Error('未返回任务 ID');
       }
+      const taskId = job.task_id;
+
+      // 轮询查询任务状态
+      const checkStatus = async () => {
+        try {
+          const status = await getTaskStatus(taskId);
+          setAnalyzeProgress(status.progress || '分析中...');
+
+          if (status.status === 'completed') {
+            if (pollInterval) clearInterval(pollInterval);
+            const result = status.result;
+            const preview = result?.report_preview || '';
+            const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
+            let decision = 'neutral';
+            if (decisionMatch) {
+              const d = decisionMatch[1].toLowerCase();
+              if (d === 'long') decision = 'long';
+              else if (d === 'short') decision = 'short';
+            }
+            setAiDecision({
+              decision,
+              conviction: result?.conviction || 50,
+              date: result?.date || '',
+            });
+            setAiReport(preview || null);
+            setAnalyzing(false);
+          } else if (status.status === 'error') {
+            if (pollInterval) clearInterval(pollInterval);
+            setError(`AI分析失败: ${status.detail || '未知错误'}`);
+            setAnalyzing(false);
+          }
+          // queued / running 状态继续轮询
+        } catch (e: any) {
+          if (pollInterval) clearInterval(pollInterval);
+          console.error('轮询失败', e);
+          setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
+          setAnalyzing(false);
+        }
+      };
+
+      // 立即查一次，之后每 5 秒查一次
+      await checkStatus();
+      pollInterval = setInterval(checkStatus, 5000);
     } catch (e: any) {
       console.error('AI分析失败', e);
       setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
-    } finally {
       setAnalyzing(false);
     }
   }, [stockInfo]);
@@ -432,6 +462,7 @@ function App() {
             aiDecision={aiDecision}
             onAnalyze={handleAnalyze}
             analyzing={analyzing}
+            analyzeProgress={analyzeProgress}
             aiReport={aiReport}
             showReport={showReport}
             onToggleReport={() => setShowReport(v => !v)}

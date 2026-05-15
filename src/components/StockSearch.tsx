@@ -26,6 +26,7 @@ interface StockSearchProps {
   } | null;
   onAnalyze?: () => void;
   analyzing?: boolean;
+  analyzeProgress?: string;
   aiReport?: string | null;
   showReport?: boolean;
   onToggleReport?: () => void;
@@ -45,7 +46,7 @@ interface RecentSearch {
 
 const StockSearch = ({
   onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
-  aiDecision, onAnalyze, analyzing, aiReport, showReport, onToggleReport, extra,
+  aiDecision, onAnalyze, analyzing, analyzeProgress, aiReport, showReport, onToggleReport, extra,
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
@@ -208,7 +209,7 @@ const StockSearch = ({
               ) : (
                 <BarChart2 className="w-4 h-4" />
               )}
-              {analyzing ? '分析中...' : 'AI 分析'}
+              {analyzing ? (analyzeProgress || '分析中...') : 'AI 分析'}
             </button>
           )}
 
