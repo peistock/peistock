@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Star, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Star, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { formatCapital } from '@/utils/indicators';
 
 interface StockSearchProps {
@@ -20,18 +18,19 @@ interface StockSearchProps {
   } | null;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
-  // 指标显示控制
-  showMAHS?: boolean;
-  onToggleMAHS?: (value: boolean) => void;
-  showEMAHS?: boolean;
-  onToggleEMAHS?: (value: boolean) => void;
-  showMA?: boolean;
-  onToggleMA?: (value: boolean) => void;
-  // 信号版本切换
-  signalVersion?: 'strict' | 'loose';
-  onToggleSignalVersion?: () => void;
-  // 股票池插槽
-  pool?: React.ReactNode;
+  // AI 分析
+  aiDecision?: {
+    decision: string;
+    conviction: number;
+    date: string;
+  } | null;
+  onAnalyze?: () => void;
+  analyzing?: boolean;
+  aiReport?: string | null;
+  showReport?: boolean;
+  onToggleReport?: () => void;
+  // 额外内容（如股票池），放在最近搜索和股票信息卡片之间
+  extra?: React.ReactNode;
 }
 
 // 最近搜索存储键
@@ -46,9 +45,7 @@ interface RecentSearch {
 
 const StockSearch = ({
   onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
-  showMAHS, onToggleMAHS, showEMAHS, onToggleEMAHS, showMA, onToggleMA,
-  signalVersion = 'strict', onToggleSignalVersion,
-  pool
+  aiDecision, onAnalyze, analyzing, aiReport, showReport, onToggleReport, extra,
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
@@ -161,10 +158,10 @@ const StockSearch = ({
         </div>
       )}
 
-      {/* 股票池 */}
-      {pool}
+      {/* 额外内容（股票池等） */}
+      {extra}
 
-      {/* Stock info */}
+      {/* Stock info + AI 决策 */}
       {stockInfo && (
         <div className="flex items-center gap-6 p-4 bg-[#161B22] rounded-xl border border-[#30363D]">
           <div>
@@ -174,75 +171,49 @@ const StockSearch = ({
             <div className="text-sm text-[#8B949E]">{stockInfo.name} · {stockInfo.market}</div>
           </div>
           <div className="flex-1" />
-          
-          {/* 指标控制开关 */}
-          {onToggleMAHS && onToggleEMAHS && onToggleMA && (
-            <div className="flex items-center gap-4">
-              {/* B/S信号版本切换 */}
-              {onToggleSignalVersion && (
-                <button
-                  onClick={onToggleSignalVersion}
-                  className={`flex items-center gap-1 text-sm font-medium transition-colors ${
-                    signalVersion === 'strict' 
-                      ? 'text-[#58A6FF] hover:text-[#79C0FF]' 
-                      : 'text-[#E3B341] hover:text-[#F0D95A]'
-                  }`}
-                  title={signalVersion === 'strict' 
-                    ? '低频BS: costDev<5%&bias<5%&CRI>90 | greedy>95%&bias>90%' 
-                    : '高频BS: 低频条件 OR costDev<10%|bias<10%|(CRI>83&costDev<30%) | greedy>95%|bias>95%'}
-                >
-                  {signalVersion === 'strict' ? (
-                    <><ToggleRight className="w-4 h-4" /> 低频BS</>
-                  ) : (
-                    <><ToggleLeft className="w-4 h-4" /> 高频BS</>
-                  )}
-                </button>
-              )}
-              
-              <div className="w-px h-4 bg-[#30363D]" />
-              
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="mahs"
-                  checked={showMAHS}
-                  onCheckedChange={onToggleMAHS}
-                  className="data-[state=checked]:bg-[#FF3435]"
-                />
-                <Label htmlFor="mahs" className="text-sm text-[#8B949E] cursor-pointer flex items-center gap-1.5">
-                  <span className="w-2 h-0.5 bg-[#FF3435]" />
-                  MAHS
-                </Label>
+
+          {/* AI 决策摘要 */}
+          {aiDecision ? (
+            <div className="flex items-center gap-3 px-4 py-2 rounded-lg border" style={{
+              borderColor: aiDecision.decision === 'long' ? '#03B17240' : aiDecision.decision === 'short' ? '#FF343540' : '#6B728040',
+              backgroundColor: aiDecision.decision === 'long' ? '#03B17210' : aiDecision.decision === 'short' ? '#FF343510' : '#6B728010',
+            }}>
+              <div className="text-right">
+                <div className="text-xs text-[#8B949E]">AI 决策</div>
+                <div className={`text-sm font-bold ${
+                  aiDecision.decision === 'long' ? 'text-[#03B172]' :
+                  aiDecision.decision === 'short' ? 'text-[#FF3435]' :
+                  'text-[#6B7280]'
+                }`}>
+                  {aiDecision.decision === 'long' ? '🔼 做多' :
+                   aiDecision.decision === 'short' ? '🔽 做空' : '➖ 观望'}
+                </div>
               </div>
-              
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="emahs"
-                  checked={showEMAHS}
-                  onCheckedChange={onToggleEMAHS}
-                  className="data-[state=checked]:bg-[#03B172]"
-                />
-                <Label htmlFor="emahs" className="text-sm text-[#8B949E] cursor-pointer flex items-center gap-1.5">
-                  <span className="w-2 h-0.5 bg-[#03B172]" />
-                  EMAHS
-                </Label>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="ma"
-                  checked={showMA}
-                  onCheckedChange={onToggleMA}
-                  className="data-[state=checked]:bg-[#58A6FF]"
-                />
-                <Label htmlFor="ma" className="text-sm text-[#8B949E] cursor-pointer">
-                  MA
-                </Label>
+              <div className="w-px h-6 bg-[#30363D]" />
+              <div className="text-right">
+                <div className="text-xs text-[#8B949E]">置信度</div>
+                <div className="text-sm font-bold text-[#D2A8FF]" style={{ fontFamily: 'JetBrains Mono' }}>
+                  {aiDecision.conviction}%
+                </div>
               </div>
             </div>
+          ) : (
+            <button
+              onClick={onAnalyze}
+              disabled={analyzing}
+              className="flex items-center gap-2 px-4 py-2 text-sm bg-[#FF3435]/10 border border-[#FF3435]/30 rounded-lg text-[#FF3435] hover:bg-[#FF3435]/20 transition-colors disabled:opacity-50"
+            >
+              {analyzing ? (
+                <div className="w-4 h-4 border-2 border-[#FF3435]/30 border-t-[#FF3435] rounded-full animate-spin" />
+              ) : (
+                <BarChart2 className="w-4 h-4" />
+              )}
+              {analyzing ? '分析中...' : 'AI 分析'}
+            </button>
           )}
 
           <div className="w-px h-8 bg-[#30363D]" />
-          
+
           {/* 收藏按钮 */}
           {onToggleFavorite && (
             <button
@@ -250,12 +221,12 @@ const StockSearch = ({
               className="p-2 rounded-lg border border-[#30363D] hover:border-[#E3B341] transition-colors"
               title={isFavorite ? '取消收藏' : '添加收藏'}
             >
-              <Star 
-                className={`w-5 h-5 ${isFavorite ? 'fill-[#E3B341] text-[#E3B341]' : 'text-[#8B949E]'}`} 
+              <Star
+                className={`w-5 h-5 ${isFavorite ? 'fill-[#E3B341] text-[#E3B341]' : 'text-[#8B949E]'}`}
               />
             </button>
           )}
-          
+
           <div className="flex items-center gap-6">
             {/* 流通股本 */}
             <div className="text-right">
@@ -280,6 +251,44 @@ const StockSearch = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* AI 分析报告 */}
+      {aiReport && stockInfo && (
+        <div className="bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden">
+          <button
+            onClick={onToggleReport}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-[#8B949E] hover:text-white hover:bg-[#0D1117] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-[#FF3435]" />
+              <span>AI 投研报告（{aiDecision?.date}）</span>
+              {aiDecision && (
+                <span className={`text-xs px-2 py-0.5 rounded ${
+                  aiDecision.decision === 'long' ? 'bg-[#03B172]/20 text-[#03B172]' :
+                  aiDecision.decision === 'short' ? 'bg-[#FF3435]/20 text-[#FF3435]' :
+                  'bg-[#6B7280]/20 text-[#6B7280]'
+                }`}>
+                  {aiDecision.decision === 'long' ? '做多' :
+                   aiDecision.decision === 'short' ? '做空' : '观望'}
+                  {aiDecision.conviction > 0 && ` · ${aiDecision.conviction}%`}
+                </span>
+              )}
+            </div>
+            {showReport ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </button>
+          {showReport && (
+            <div className="px-4 py-3 border-t border-[#30363D]">
+              <div className="prose prose-invert prose-sm max-w-none">
+                <pre className="whitespace-pre-wrap text-[13px] text-[#C9D1D9] leading-relaxed font-mono">{aiReport}</pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

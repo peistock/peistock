@@ -12,6 +12,9 @@ import { getMultiTimeframeData as getTencentMultiData, getQuote as getTencentQuo
 // import { getMultiTimeframeData as getBiyingMultiData, getQuote as getBiyingQuote, isAvailable as isBiyingAvailable } from './utils/biyingApi';
 import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { analyzeStock } from './utils/researchApi';
 
 
 // 时间维度类型
@@ -51,7 +54,17 @@ function App() {
   
   // 信号版本切换：严格版(默认) / 宽松版
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
-  
+
+  // AI 投研分析
+  const [aiDecision, setAiDecision] = useState<{
+    decision: string;
+    conviction: number;
+    date: string;
+  } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiReport, setAiReport] = useState<string | null>(null);
+  const [showReport, setShowReport] = useState(false);
+
   // 收藏功能 - 存储代码和名称
   interface FavoriteItem {
     symbol: string;
@@ -103,6 +116,9 @@ function App() {
     setLoading(true);
     setError(null);
     setCurrentSymbol(symbol);
+    setAiDecision(null);
+    setAiReport(null);
+    setShowReport(false);
     
     try {
       let multiData, quote;
@@ -216,6 +232,40 @@ function App() {
     handleSearch(item.symbol);
     setShowFavorites(false);
   }, [handleSearch]);
+
+  // AI 投研分析
+  const handleAnalyze = useCallback(async () => {
+    if (!stockInfo) return;
+    setAnalyzing(true);
+    try {
+      const result = await analyzeStock(stockInfo.symbol, 'B');
+      if (result.status === 'completed') {
+        const preview = result.report_preview || '';
+        // 精确提取 ## 决策（Decision）后面的决策值，避免全文关键词误判
+        const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
+        let decision = 'neutral';
+        if (decisionMatch) {
+          const d = decisionMatch[1].toLowerCase();
+          if (d === 'long') decision = 'long';
+          else if (d === 'short') decision = 'short';
+        }
+
+        setAiDecision({
+          decision,
+          conviction: result.conviction || 50,
+          date: result.date,
+        });
+        setAiReport(result.report_preview || null);
+      } else {
+        setError(`AI分析失败: ${result.detail || '未知错误'}`);
+      }
+    } catch (e: any) {
+      console.error('AI分析失败', e);
+      setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [stockInfo]);
 
   // 检查是否有数据
   const hasData = timeframeData.daily && timeframeData.weekly && timeframeData.min15;
@@ -379,15 +429,13 @@ function App() {
             stockInfo={stockInfo}
             isFavorite={stockInfo ? favorites.some(f => f.symbol === stockInfo.symbol) : false}
             onToggleFavorite={stockInfo ? () => toggleFavorite(stockInfo.symbol, stockInfo.name) : undefined}
-            showMAHS={showMAHS}
-            onToggleMAHS={setShowMAHS}
-            showEMAHS={showEMAHS}
-            onToggleEMAHS={setShowEMAHS}
-            showMA={showMA}
-            onToggleMA={setShowMA}
-            signalVersion={signalVersion}
-            onToggleSignalVersion={() => setSignalVersion(prev => prev === 'strict' ? 'loose' : 'strict')}
-            pool={<StockPool onSelect={handleSearch} />}
+            aiDecision={aiDecision}
+            onAnalyze={handleAnalyze}
+            analyzing={analyzing}
+            aiReport={aiReport}
+            showReport={showReport}
+            onToggleReport={() => setShowReport(v => !v)}
+            extra={<StockPool onSelect={handleSearch} />}
           />
         </section>
 
@@ -399,9 +447,9 @@ function App() {
           </Alert>
         )}
 
-        {/* Three Charts - Left/Right Layout */}
+        {/* Charts: 日K独占一行, 周K+15分K并排 */}
         {hasData && (
-          <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {chartConfigs.map((config) => {
               const tf = config.key;
               const data = timeframeData[tf]!;
@@ -873,7 +921,7 @@ function App() {
               }
               
               return (
-                <section key={tf} className="bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden">
+                <section key={tf} className={`bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${tf === 'daily' ? 'lg:col-span-2' : ''}`}>
                   {/* Section Header */}
                   <div className="flex items-center gap-3 px-4 py-3 border-b border-[#30363D] bg-[#0D1117]">
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${config.color}20` }}>
@@ -882,6 +930,32 @@ function App() {
                     <div className="flex-1">
                       <h3 className="font-bold text-white text-sm">{config.label}</h3>
                     </div>
+                    {/* 日K指标开关 */}
+                    {tf === 'daily' && (
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setSignalVersion(prev => prev === 'strict' ? 'loose' : 'strict')}
+                          className={`text-xs font-medium transition-colors ${
+                            signalVersion === 'strict' ? 'text-[#58A6FF]' : 'text-[#E3B341]'
+                          }`}
+                        >
+                          {signalVersion === 'strict' ? '低频BS' : '高频BS'}
+                        </button>
+                        <div className="w-px h-3 bg-[#30363D]" />
+                        <div className="flex items-center gap-1.5">
+                          <Switch id="mahs-daily" checked={showMAHS} onCheckedChange={setShowMAHS} className="data-[state=checked]:bg-[#FF3435] scale-75" />
+                          <Label htmlFor="mahs-daily" className="text-[10px] text-[#8B949E] cursor-pointer">MAHS</Label>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Switch id="emahs-daily" checked={showEMAHS} onCheckedChange={setShowEMAHS} className="data-[state=checked]:bg-[#03B172] scale-75" />
+                          <Label htmlFor="emahs-daily" className="text-[10px] text-[#8B949E] cursor-pointer">EMAHS</Label>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Switch id="ma-daily" checked={showMA} onCheckedChange={setShowMA} className="data-[state=checked]:bg-[#58A6FF] scale-75" />
+                          <Label htmlFor="ma-daily" className="text-[10px] text-[#8B949E] cursor-pointer">MA</Label>
+                        </div>
+                      </div>
+                    )}
                     <div className="text-xs text-[#8B949E]">
                       <span className="text-white font-mono">{data.data.length}</span> 条数据
                       {tf === 'daily' && (
@@ -889,12 +963,12 @@ function App() {
                       )}
                     </div>
                   </div>
-                  
-                  {/* Content: Chart Left + Indicators/Signals Right */}
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-0">
-                    {/* Left: Chart - 占3/4宽度 */}
-                    <div className="lg:col-span-3 p-4">
-                      <div className="h-[600px]">
+
+                  {/* Content */}
+                  <div className={tf === 'daily' ? 'grid grid-cols-1 lg:grid-cols-4 gap-0' : 'grid grid-cols-1 gap-0'}>
+                    {/* Chart */}
+                    <div className={tf === 'daily' ? 'lg:col-span-3 p-4' : 'p-4'}>
+                      <div className={tf === 'daily' ? 'h-[600px]' : 'h-[380px]'}>
                         <StockChart
                           stockData={data.data}
                           indicators={data.indicators}
@@ -902,14 +976,15 @@ function App() {
                           showEMAHS={tf === 'daily' && showEMAHS}
                           showMA={showMA}
                           title=""
+                          compact={tf !== 'daily'}
                           timeframe={tf}
                           version={signalVersion}
                         />
                       </div>
                     </div>
                     
-                    {/* Right: Indicators & Signals - 占1/4宽度 */}
-                    <div className="lg:col-span-1 p-3 space-y-2 border-l border-[#30363D] bg-[#0D1117] overflow-y-auto max-h-[600px]">
+                    {/* Indicators & Signals */}
+                    <div className={tf === 'daily' ? 'lg:col-span-1 p-3 space-y-2 border-l border-[#30363D] bg-[#0D1117] overflow-y-auto max-h-[600px]' : 'p-3 space-y-2 border-t border-[#30363D] bg-[#0D1117] min-h-[120px]'}>
                       {/* CRI + 斜率因子 - 只有日K显示 */}
                       {tf === 'daily' && (
                         <div className="space-y-2">

@@ -903,16 +903,16 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: 'B(底背离)', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: version === 'strict' ? 'B(严格)' : 'B(宽松)', icon: 'rect', itemStyle: { color: '#D946EF' } },
             ],
-        textStyle: { color: '#8B949E', fontSize: compact ? 7 : 8 },
-        top: 32,
-        itemWidth: 10,
+        textStyle: { color: '#8B949E', fontSize: compact ? 6 : 8 },
+        top: compact ? 18 : 32,
+        itemWidth: compact ? 8 : 10,
         itemHeight: 2,
-        itemGap: 4,
+        itemGap: compact ? 2 : 4,
         width: '96%',
         left: 'center',
         type: 'scroll',
-        pageIconSize: 10,
-        pageTextStyle: { fontSize: 8 }
+        pageIconSize: compact ? 8 : 10,
+        pageTextStyle: { fontSize: compact ? 6 : 8 }
       },
       tooltip: {
         trigger: 'axis',
@@ -954,7 +954,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           return html;
         },
       },
-      grid: [
+      grid: compact ? [
+        { left: '36', right: '36', top: '26', height: '56%' },  // 主图 - 紧凑
+        { left: '36', right: '36', top: '66%', height: '24%' },  // 副图 - 紧凑
+      ] : [
         { left: '50', right: '50', top: '55', bottom: '110', height: '58%' },  // 主图
         { left: '50', right: '50', top: '76%', bottom: '40', height: '16%' },  // 副图下移，避免与主图重叠
       ],
@@ -1050,13 +1053,13 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
       ],
       dataZoom: [
         { type: 'inside', xAxisIndex: [0, 1], start: 70, end: 100 },
-        { 
-          type: 'slider', 
-          xAxisIndex: [0, 1], 
-          start: 70, 
-          end: 100, 
-          bottom: 10, 
-          height: 20,
+        {
+          type: 'slider',
+          xAxisIndex: [0, 1],
+          start: 70,
+          end: 100,
+          bottom: compact ? 4 : 10,
+          height: compact ? 12 : 20,
           borderColor: '#30363D',
           fillerColor: 'rgba(255, 52, 53, 0.2)',
           handleStyle: {
@@ -1064,9 +1067,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
             borderColor: '#FF3435'
           },
           textStyle: {
-            color: '#8B949E'
+            color: '#8B949E',
+            fontSize: compact ? 8 : 12,
           },
-          showDetail: true,
+          showDetail: !compact,
           showDataShadow: true
         },
       ],
