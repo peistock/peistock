@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { Search, TrendingUp, TrendingDown, Database, Clock, Star, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -286,7 +287,7 @@ const StockSearch = ({
           {showReport && (
             <div className="px-4 py-3 border-t border-[#30363D]">
               <div className="prose prose-invert prose-sm max-w-none">
-                <pre className="whitespace-pre-wrap text-[13px] text-[#C9D1D9] leading-relaxed font-mono">{aiReport}</pre>
+                <ReactMarkdown>{aiReport}</ReactMarkdown>
               </div>
             </div>
           )}

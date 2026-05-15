@@ -130,9 +130,23 @@ node test-scripts/test_percentile.mjs
 - 作为fallback使用
 - 数据格式与东方财富略有不同
 
+## HTTP API Server
+
+启动：`npx tsx scripts/api-server.ts`（端口 3457，可通过 `PORT` 环境变量修改）
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/stock/:code` | GET | 单股查询+指标计算+严格信号检测 |
+| `/api/signals/latest` | GET | 最新扫描结果（Excel） |
+| `/api/watchlist` | GET | 股票池列表（154只） |
+| `/api/scan` | POST | 批量扫描（限10只） |
+| `/health` | GET | 健康检查 |
+
+供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。
+
 ## 部署信息
 
-- **生产环境**: 腾讯云 EdgeOne Pages
+- **前端**: 腾讯云 EdgeOne Pages
 - **构建命令**: `npm run build`
 - **构建输出**: `dist/` 目录
 - **自动部署**: GitHub push 后自动触发 EdgeOne 构建

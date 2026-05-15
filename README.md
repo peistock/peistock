@@ -9,6 +9,7 @@
 - **信号检测**：严格 B/S 交易信号（底背离/顶背离/恐慌/贪婪）
 - **每日扫描**：工作日自动扫描股票池，邮件推送信号
 - **大V追踪**：与 xueqiu_tracker 联动，扫描雪球大V共同关注股票
+- **HTTP API**：供外部系统（如 family-mind）查询股票数据、信号、扫描结果
 
 ## 快速开始
 
@@ -44,6 +45,7 @@ src/
   App.tsx                 # 主界面
 scripts/
   daily-watchlist-scan.ts # 每日扫描主脚本
+  api-server.ts           # HTTP API 服务器（端口3457）
 ```
 
 ## 技术栈
