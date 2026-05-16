@@ -421,9 +421,13 @@ class ResearchInstitute:
                            "fetch_webpage", "jina_reader", "find_chrome_url"):
             toolkit._registry._tools.pop(_bad_tool, None)
             toolkit._registry._meta.pop(_bad_tool, None)
+        # 禁止 LLM 写文件/执行代码（必须直接在回复中输出完整报告）
+        for _no_write in ("write_file", "execute_code", "pip_install", "md_to_pdf"):
+            toolkit._registry._tools.pop(_no_write, None)
+            toolkit._registry._meta.pop(_no_write, None)
 
         today = datetime.now().strftime("%Y年%m月%d日")
-        system_prompt = self._build_system_prompt(role, today)
+        system_prompt = self._build_system_prompt(role, today, context=context)
 
         # 自动议题生成：获取该角色当日热点议题
         try:
@@ -652,13 +656,25 @@ class ResearchInstitute:
         logger.info(f"[signal_monitor] 完成，报告: {report_path}")
         return report_path
 
-    def _build_system_prompt(self, role: AnalystRole, today: str) -> str:
+    def _build_system_prompt(self, role: AnalystRole, today: str, context: dict = None) -> str:
         weekday = datetime.now().strftime("%A")
         lines = [
             f"今天是 {today}（{weekday}）。",
             "",
             f"日期锚（DATE ANCHOR）：以下所有数据、事件和分析均基于 {today} 当天的信息。不要依赖训练数据中的历史知识，必须以当日可获取的实时信息为准。",
             "",
+        ]
+
+        # 个股分析时追加财报时间线锚定
+        if context and context.get("code"):
+            lines.append("财报时间线锚定（必须遵守）：")
+            lines.append("- A股2026年Q1季报已于2026年4月30日前全部披露完毕，分析中不得将其视为'即将披露'的未来催化剂")
+            lines.append("- 港股主要公司2026年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布")
+            lines.append("- 美股Mag7的2026年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕")
+            lines.append("- 严禁基于已披露财报进行'可能''或将''预计'等猜测性表述；已披露的数据就是事实，未披露的数据才能使用预期")
+            lines.append("")
+
+        lines.extend([
             role.persona,
             "",
             "执行规则：",
@@ -668,9 +684,10 @@ class ResearchInstitute:
             "4. 输出 Markdown 格式，结构清晰",
             "5. 不要输出任何 thinking、reasoning 或 thought 标签，直接输出最终报告",
             "6. 直接在最终回复中输出完整报告全文，不要调用 write_file 工具写入文件",
-        ]
+            "7. 禁止写代码、禁止创建文件、禁止执行脚本——所有分析必须在同一条回复中用自然语言完成",
+        ])
         if role.tools:
-            lines.append(f"7. 你可以使用的工具: {', '.join(role.tools)}")
+            lines.append(f"8. 你可以使用的工具: {', '.join(role.tools)}")
         lines.append(
             "8. 涉及财报、业绩、营收、利润等财务数据时，必须明确标注数据来源类型："
             "[已发布财报] — 公司正式披露并经审计的数据；"
