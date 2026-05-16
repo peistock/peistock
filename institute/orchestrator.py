@@ -302,16 +302,21 @@ class ResearchInstitute:
         strict_sigs = signals.get("strict", [])
         sig_type = signals.get("signalType", "—")
 
+        # Python 指标引擎返回 snake_case 字段，兼容两种命名
+        cri_pct = latest.get('cri_percentile', latest.get('criPercentile', 0))
+        greedy_pct = latest.get('greedy_percentile', latest.get('greedyPercentile', 0))
+        bias225_pct = latest.get('bias225_percentile', latest.get('bias225Percentile', 0))
+        cost_pct = latest.get('cost_deviation_percentile', latest.get('costDeviationPercentile', 0))
         lines = [
             f"【peistock 技术指标 · {name} {code}】",
             f"价格: {price:.2f}  涨跌: {change_pct:.2f}%  日期: {date_str}",
             "",
             "| 指标 | 值 | 分位 |",
             "|------|-----|------|",
-            f"| CRI | {latest.get('cri', 0):.2f} | {latest.get('criPercentile', 0):.1f}% |",
-            f"| 贪婪指数 | {latest.get('greedy', 0):.2f} | {latest.get('greedyPercentile', 0):.1f}% |",
-            f"| BIAS225 | — | {latest.get('bias225Percentile', 0):.1f}% |",
-            f"| 成本偏离 | — | {latest.get('costDeviationPercentile', 0):.1f}% |",
+            f"| CRI | {latest.get('cri', 0):.2f} | {cri_pct:.1f}% |",
+            f"| 贪婪指数 | {latest.get('greedy', 0):.2f} | {greedy_pct:.1f}% |",
+            f"| BIAS225 | — | {bias225_pct:.1f}% |",
+            f"| 成本偏离 | — | {cost_pct:.1f}% |",
             f"| MAHS | {latest.get('mahs', 0):.2f} | — |",
             f"| EMAHS | {latest.get('emahs', 0):.2f} | — |",
             "",
