@@ -275,6 +275,33 @@ function App() {
         throw new Error('未返回任务 ID');
       }
 
+      // 后端缓存命中时直接返回 completed，无需轮询
+      if (job.status === 'completed' && job.result?.report_preview) {
+        const preview = job.result.report_preview;
+        const decisionMatch = preview.match(/##\s*决策[（(]Decision[）)]\s*\n?\s*(LONG|SHORT|NEUTRAL)/i);
+        let decision = 'neutral';
+        if (decisionMatch) {
+          const d = decisionMatch[1].toLowerCase();
+          if (d === 'long') decision = 'long';
+          else if (d === 'short') decision = 'short';
+        }
+        setBackgroundJobs(prev => ({
+          ...prev,
+          [code]: {
+            taskId: job.task_id,
+            code,
+            name,
+            status: 'completed',
+            progress: '分析完成',
+            decision,
+            conviction: job.result?.conviction || 50,
+            date: job.result?.date || '',
+            reportPreview: preview,
+          },
+        }));
+        return;
+      }
+
       setBackgroundJobs(prev => ({
         ...prev,
         [code]: {
