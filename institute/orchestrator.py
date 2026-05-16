@@ -569,11 +569,20 @@ class ResearchInstitute:
                         reply = largest.read_text(encoding="utf-8")
 
             report_content = self._format_report(role, today, reply)
-            report_path.write_text(report_content, encoding="utf-8")
 
-            # 向量库和衰减记忆已禁用（加速分析）
-            # TODO: 修复后恢复
-            pass
+            # 空内容保护：LLM 返回异常时不跑无意义的 Fact-Check
+            if len(report_content.strip()) < 200:
+                logger.error(f"[{slug}] 报告内容过短 ({len(report_content)} 字符)，判定为生成失败")
+                report_path.write_text(
+                    f"# {role.name} - {today}\n\n"
+                    f"⚠️ 报告生成失败：LLM 返回内容为空或极短。\n"
+                    f"（原始回复长度：{len(reply)} 字符，清洗后：{len(report_content)} 字符）\n"
+                    f"请稍后重试，或检查模型服务状态。\n",
+                    encoding="utf-8"
+                )
+                return report_path
+
+            report_path.write_text(report_content, encoding="utf-8")
 
             # Fact-Check：事实核查
             try:
@@ -789,8 +798,10 @@ class ResearchInstitute:
         return header + content
 
     def _clean_reasoning_tokens(self, text: str) -> str:
-        """清洗模型内部 reasoning token"""
+        """清洗模型内部 reasoning token（支持 DeepSeek <think>、Qwen <|channel|> 等格式）"""
         import re
+        # DeepSeek-R1 等模型：<think>...</think>
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
         # 匹配 <|channel>thought ... <|channel|> 格式的 thinking 块
         text = re.sub(r"<\|channel\>thought.*?<\|channel\|>", "", text, flags=re.DOTALL)
         # 匹配单独的 thinking 标签
