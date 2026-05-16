@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   Tooltip,
   TooltipContent,
@@ -68,8 +67,6 @@ function ReportCell({ text, role }: { text: string; role: string }) {
 }
 
 export default function ReportHistory({ data }: ReportHistoryProps) {
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-
   if (data.length === 0) {
     return (
       <div className="text-center py-8 text-[#8B949E] text-sm">
@@ -77,18 +74,6 @@ export default function ReportHistory({ data }: ReportHistoryProps) {
       </div>
     );
   }
-
-  const toggleRow = (date: string) => {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(date)) {
-        next.delete(date);
-      } else {
-        next.add(date);
-      }
-      return next;
-    });
-  };
 
   return (
     <div className="overflow-x-auto">
@@ -116,9 +101,7 @@ export default function ReportHistory({ data }: ReportHistoryProps) {
           </tr>
         </thead>
         <tbody>
-          {data.map((item) => {
-            const isExpanded = expandedRows.has(item.date);
-            return (
+          {data.map((item) => (
               <tr
                 key={item.date}
                 className="border-b border-[#30363D]/60 hover:bg-[#0D1117]/50 transition-colors"
@@ -157,8 +140,7 @@ export default function ReportHistory({ data }: ReportHistoryProps) {
                   <DecisionBadge decision={item.decision} conviction={item.conviction} />
                 </td>
               </tr>
-            );
-          })}
+            ))}
         </tbody>
       </table>
     </div>

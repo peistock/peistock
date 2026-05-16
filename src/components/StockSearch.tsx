@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Star, Plus, Check, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Plus, Check, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { formatCapital } from '@/utils/indicators';
