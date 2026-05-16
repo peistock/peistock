@@ -400,7 +400,10 @@ function App() {
     });
 
     return () => {
-      Object.values(pollIntervalsRef.current).forEach(clearInterval);
+      Object.entries(pollIntervalsRef.current).forEach(([code, interval]) => {
+        clearInterval(interval);
+        delete pollIntervalsRef.current[code];
+      });
     };
   }, [backgroundJobs]);
 
