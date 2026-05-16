@@ -39,14 +39,18 @@ class BullBearAnalyst:
 
     def analyze_stock(self, side: str, code: str, quote: Dict,
                       indicators_latest: Dict, signal_result: Dict,
-                      news: Optional[List[Dict]] = None) -> AnalystResult:
-        """个股 Bull/Bear。复用市场级 system_prompt,user_prompt 包注入指标数字 + 近期新闻。"""
+                      news: Optional[List[Dict]] = None,
+                      research_report: Optional[str] = None) -> AnalystResult:
+        """个股 Bull/Bear。复用市场级 system_prompt,user_prompt 包注入指标数字 + 近期新闻 + 研报数据。"""
         system_prompt = self.bull_prompt if side == "bull" else self.bear_prompt
         if self.llm is None:
             logger.warning("[stock-%s] LLM not configured, returning neutral", side)
             return self._neutral(side)
 
-        user_prompt = self._build_stock_user_prompt(side, code, quote, indicators_latest, signal_result, news=news)
+        user_prompt = self._build_stock_user_prompt(
+            side, code, quote, indicators_latest, signal_result,
+            news=news, research_report=research_report
+        )
 
         try:
             raw = self.llm.chat(
@@ -187,8 +191,9 @@ class BullBearAnalyst:
 
     def _build_stock_user_prompt(self, side: str, code: str, quote: Dict,
                                  ind: Dict, signal_result: Dict,
-                                 news: Optional[List[Dict]] = None) -> str:
-        """个股 prompt: 注入 peistock 指标摘要 + 严格 B/S 信号 + 近期新闻与公告。"""
+                                 news: Optional[List[Dict]] = None,
+                                 research_report: Optional[str] = None) -> str:
+        """个股 prompt: 注入 peistock 指标摘要 + 严格 B/S 信号 + 近期新闻与公告 + 研报客观数据。"""
         def fmt(v, nd=2):
             if v is None:
                 return "N/A"
@@ -228,7 +233,14 @@ class BullBearAnalyst:
         else:
             lines.append("(no news fetched)")
         lines.append("")
-        lines.append("Use the news above as narrative context — explain WHY the indicators look this way, "
+
+        # 研报客观数据注入
+        if research_report:
+            lines.append("Research report objective data (industry metrics, market analysis, leading indicators):")
+            lines.append(research_report)
+            lines.append("")
+
+        lines.append("Use the news and research data above as narrative context — explain WHY the indicators look this way, "
                      "or whether news flow contradicts what the indicators suggest.")
         lines.append("")
 

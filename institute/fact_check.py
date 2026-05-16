@@ -26,6 +26,11 @@ VERIFY_PROMPT = """你是一位严谨的事实核查员。请对以下声明进�
 2. 如果声明存疑（数字异常、逻辑矛盾、来源不明），回复 "QUESTION: 原因"
 3. 如果声明明显错误（违背常识、数据荒谬），回复 "FAIL: 原因"
 
+额外检查（时间线一致性）：
+- 若报告中同时出现"预计/即将/等待/下周/待发布/将发布"等未来时间标记，又出现具体的财务数据（如"营收同比+11%""净利润增长+20%"），必须标记为 QUESTION 或 FAIL
+- 若日期声明与当前已知时间线明显矛盾（如 2026 年 5 月称"Q1 财报即将发布"但又有具体 Q1 营收数字），必须标记为 QUESTION
+- 若财务数据未标注来源或来源标注与数据性质不符（如将市场预期标为已发布财报），必须标记为 QUESTION
+
 请逐条判断：
 
 {claims}
@@ -73,6 +78,65 @@ def extract_claims(text: str, max_claims: int = 10) -> List[Dict]:
     return result[:max_claims]
 
 
+def check_temporal_contradictions(text: str) -> List[Dict]:
+    """规则层预扫描：检测明显的时间线矛盾"""
+    contradictions = []
+
+    # 步骤1: 找出所有"未来发布"标记的位置
+    future_kw = re.compile(r'预计|即将|等待|下周|待发布|将发布|未发布|未披露')
+    report_kw = re.compile(r'财报|业绩|季报|年报')
+    future_positions = []
+    for m in future_kw.finditer(text):
+        future_positions.append(m.start())
+
+    # 步骤2: 检查是否有"财报"关键词在"未来标记"附近（30字符内）
+    has_future_report = False
+    for m in report_kw.finditer(text):
+        report_pos = m.start()
+        for fp in future_positions:
+            if abs(report_pos - fp) <= 30:
+                has_future_report = True
+                break
+        if has_future_report:
+            break
+
+    # 步骤3: 找出具体的财务数据（带同比/环比的具体百分比，排除范围）
+    fin_expr = re.compile(
+        r'(?:Q[1-4]|季度)[^\n，。；]{0,30}(?:营收|收入|利润|净利润|EPS|毛利)[^\n，。；]{0,15}(?:同比|环比)[^\n，。；]{0,5}[+-]?\d+\.?\d*%(?!-|~|至)',
+        re.IGNORECASE
+    )
+    fin_match = fin_expr.search(text)
+    has_financial = bool(fin_match)
+
+    # 步骤4: 若同时满足，且财务数据附近不含"预期"标记，则判定矛盾
+    if has_future_report and has_financial:
+        # 检查财务数据前面最多 20 个字符是否有"预期"类标记
+        pre_ctx = text[max(0, fin_match.start()-20):fin_match.start()]
+        is_expectation = bool(re.search(r'(?:预期|一致预期|市场共识|分析师预测)', pre_ctx))
+        if not is_expectation:
+            contradictions.append({
+                "claim": "报告中同时出现'预计发布财报'和具体财务数据",
+                "result": "QUESTION: 时间线矛盾 — 若财报尚未发布，不应引用具体营收/利润数字；若已有具体数字，则财报应已发布",
+                "reason": "规则预扫描发现'未来发布'标记与具体财务数据并存"
+            })
+
+    # 模式2: 同一季度既被描述为"已披露"又被描述为"即将披露"
+    quarter_patterns = re.compile(r'(?:Q[1-4]|第[一二三四]季度).{0,30}(?:202[5-6])')
+    for m in quarter_patterns.finditer(text):
+        ctx_start = max(0, m.start() - 50)
+        ctx_end = min(len(text), m.end() + 50)
+        ctx = text[ctx_start:ctx_end]
+        if re.search(r'(?:预计|即将|等待|下周|待发布)', ctx) and re.search(r'(?:已披露|已发布|同比上涨|同比增长|环比下降)', ctx):
+            contradictions.append({
+                "claim": f"同一季度({m.group(0)})既被描述为即将发布又引用已发布数据",
+                "result": "QUESTION: 时间线矛盾 — 同一事件不能同时处于'未发生'和'已发生'状态",
+                "reason": "规则预扫描发现同一季度在上下文中时态矛盾"
+            })
+            break  # 只报告一次同类矛盾
+
+    return contradictions
+
+
 def verify_claims(claims: List[Dict], llm_client) -> List[Dict]:
     """用 LLM 验证声明"""
     if not claims or llm_client is None:
@@ -106,17 +170,25 @@ def fact_check_report(report_text: str, llm_client, max_claims: int = 8) -> Dict
     返回：{{"claims": [...], "verified": [...], "summary": "核查摘要"}}
     """
     claims = extract_claims(report_text, max_claims=max_claims)
-    if not claims:
+
+    # 规则层预扫描：时间线矛盾
+    temporal_issues = check_temporal_contradictions(report_text)
+
+    if not claims and not temporal_issues:
         return {"claims": [], "verified": [], "summary": "未提取到可核查的声明"}
 
-    verified = verify_claims(claims, llm_client)
+    verified = verify_claims(claims, llm_client) if claims else []
+
+    # 合并规则层预扫描结果
+    if temporal_issues:
+        verified = temporal_issues + verified
 
     # 统计
     pass_count = sum(1 for v in verified if v.get("result") == "PASS")
     question_count = sum(1 for v in verified if v.get("result", "").startswith("QUESTION"))
     fail_count = sum(1 for v in verified if v.get("result", "").startswith("FAIL"))
 
-    summary = f"核查 {len(claims)} 条声明：✅ {pass_count} 通过 / ⚠️ {question_count} 存疑 / ❌ {fail_count} 错误"
+    summary = f"核查 {len(claims)} 条声明 + {len(temporal_issues)} 条规则扫描：✅ {pass_count} 通过 / ⚠️ {question_count} 存疑 / ❌ {fail_count} 错误"
 
     return {
         "claims": claims,

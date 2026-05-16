@@ -145,6 +145,19 @@ def run(code: str) -> int:
         title = (n.get("title") or "")[:50]
         print("    · " + str(n.get("time", ""))[:16] + "  " + title)
 
+    # 获取研报客观数据（A 股）
+    rr_data = ""
+    if market == "a":
+        print("  - fetching research reports...")
+        try:
+            from core.research_report import get_research_report_data, summarize_for_prompt
+            rr_raw = get_research_report_data(code, market="a", limit=2, llm=None)
+            if rr_raw:
+                rr_data = summarize_for_prompt(rr_raw, max_total_chars=2000)
+                print("    · research reports: " + str(len(rr_data)) + " chars")
+        except Exception as e:
+            print("    · research reports failed: " + str(e))
+
     if _check_mock_block_stock(dl, code, all_news):
         return 10
 
@@ -154,8 +167,8 @@ def run(code: str) -> int:
     if llm is not None:
         print("  - LLM model: " + str(getattr(llm, "model_daily", "unknown")))
     analyst = BullBearAnalyst(config, llm=llm)
-    bull = analyst.analyze_stock("bull", code, quote, latest, signal_result, news=all_news)
-    bear = analyst.analyze_stock("bear", code, quote, latest, signal_result, news=all_news)
+    bull = analyst.analyze_stock("bull", code, quote, latest, signal_result, news=all_news, research_report=rr_data)
+    bear = analyst.analyze_stock("bear", code, quote, latest, signal_result, news=all_news, research_report=rr_data)
     print("  Bull: " + bull.stance + " | confidence=" + str(bull.confidence))
     print("  Bear: " + bear.stance + " | confidence=" + str(bear.confidence))
 

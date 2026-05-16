@@ -452,6 +452,13 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
+            # 研报客观数据注入（Bull/Bear/Preemption 需要，已预取于 context）
+            if slug in ("bull", "bear", "preemption"):
+                rr_data = context.get("research_report_data") if context else None
+                if rr_data:
+                    logger.info(f"[{slug}] 预注入研报客观数据: {code} ({len(rr_data)} 字符)")
+                    messages.append(AgentMessage.user(rr_data))
+
         # 依赖角色：注入已完成的分析师报告
         # Chair 读摘要即可（加速），Preemption/Sentiment 需读完整报告（做准确判断）
         if role.dependencies:
@@ -659,6 +666,13 @@ class ResearchInstitute:
         ]
         if role.tools:
             lines.append(f"7. 你可以使用的工具: {', '.join(role.tools)}")
+        lines.append(
+            "8. 涉及财报、业绩、营收、利润等财务数据时，必须明确标注数据来源类型："
+            "[已发布财报] — 公司正式披露并经审计的数据；"
+            "[市场预期/一致预期] — 分析师预测或市场共识，尚未正式发布；"
+            "[历史数据] — 过往季度/年度的已发布数据。"
+            "严禁将市场预期误当作已发布财报，严禁将历史数据误当作最新数据。"
+        )
         return "\n".join(lines)
 
     def _build_user_prompt(self, role: AnalystRole, today: str, topics: list = None, context: dict = None) -> str:

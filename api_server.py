@@ -69,7 +69,19 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
     """后台执行分析链，结果写入 _jobs。"""
     inst = _get_institute()
     try:
-        ctx = {"code": code, "signal": signal}
+        # Phase 0: 预取研报客观数据（只取一次，供 Bull/Bear/Preemption 共用）
+        research_data = ""
+        try:
+            from core.research_report import get_research_report_data, summarize_for_prompt
+            market = "a" if len(code) == 6 and code.isdigit() else "hk"
+            rr_raw = get_research_report_data(code, market=market, limit=2, llm=inst.llm)
+            if rr_raw:
+                research_data = summarize_for_prompt(rr_raw, max_total_chars=2000)
+                logger.info(f"[{code}] 研报数据已获取: {len(research_data)} 字符")
+        except Exception as e:
+            logger.warning(f"[{code}] 研报获取失败: {e}")
+
+        ctx = {"code": code, "signal": signal, "research_report_data": research_data}
 
         with _jobs_lock:
             _jobs[task_id]["status"] = "running"
