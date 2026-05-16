@@ -151,3 +151,18 @@ node test-scripts/test_percentile.mjs
 - **构建输出**: `dist/` 目录
 - **自动部署**: GitHub push 后自动触发 EdgeOne 构建
 - **构建配置**: `edgeone.json`
+- **AI 分析后端**: RebelResearchOS (`research.peistock.win`)，部署在 JD Cloud 服务器，通过 Cloudflare Tunnel 代理
+  - 本地开发时 Vite 代理 `/api/research` → `http://localhost:8000`
+  - 生产环境直接请求 `research.peistock.win`
+
+## 已知问题
+
+### HK 个股流通股索引（2026-05-16 修正）
+
+腾讯 API qt 数组中：
+- `qt[70]` = 流通股本（float 字符串，如 `'95912.000'`）
+- `qt[69]` = 总股本
+
+曾误用 `qt[69]` 导致 DD 值计算为 ~500（应为 ~80）。`src/utils/tencentApi.ts` 已修正为 `qt[70]`。
+
+`src/utils/stockCapital.ts` 已硬编码主要 HK 龙头流通股本作为本地兜底。

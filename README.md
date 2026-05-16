@@ -9,7 +9,8 @@
 - **信号检测**：严格 B/S 交易信号（底背离/顶背离/恐慌/贪婪）
 - **每日扫描**：工作日自动扫描股票池，邮件推送信号
 - **大V追踪**：与 xueqiu_tracker 联动，扫描雪球大V共同关注股票
-- **HTTP API**：供外部系统（如 family-mind）查询股票数据、信号、扫描结果
+- **AI 投研分析**：集成 RebelResearchOS，点击"AI 分析"触发 Bull/Bear/Preemption/Chair 四步链，输出 LONG/SHORT/NEUTRAL 决策卡
+- **HTTP API**：供外部系统查询股票数据、信号、扫描结果
 
 ## 快速开始
 
@@ -47,6 +48,11 @@ scripts/
   daily-watchlist-scan.ts # 每日扫描主脚本
   api-server.ts           # HTTP API 服务器（端口3457）
 ```
+
+## 部署
+
+- **前端**: 腾讯云 EdgeOne Pages（GitHub push 自动触发构建）
+- **AI 分析后端**: RebelResearchOS 部署在 JD Cloud 服务器，通过 `research.peistock.win` 访问
 
 ## 技术栈
 
