@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 13% 5%;
+    --foreground: 210 20% 85%;
+    --card: 220 16% 8%;
+    --card-foreground: 210 20% 85%;
+    --popover: 220 16% 8%;
+    --popover-foreground: 210 20% 85%;
+    --primary: 0 72% 57%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 152 96% 35%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 16% 12%;
+    --muted-foreground: 215 14% 55%;
+    --accent: 220 16% 15%;
+    --accent-foreground: 210 20% 85%;
+    --destructive: 0 72% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 14% 22%;
+    --input: 215 14% 22%;
+    --ring: 0 72% 57%;
+    --radius: 0.5rem;
+    
+    --color-up: #FF3435;
+    --color-down: #03B172;
+    --color-bg: #0D1117;
+    --color-card: #161B22;
+    --color-border: #30363D;
+    --color-text: #C9D1D9;
+    --color-text-secondary: #8B949E;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-[#0D1117] text-[#C9D1D9] antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'JetBrains Mono', monospace;
+  }
+  
+  code, pre {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer utilities {
+  .text-up {
+    color: var(--color-up);
+  }
+  
+  .text-down {
+    color: var(--color-down);
+  }
+  
+  .bg-card-dark {
+    background-color: var(--color-card);
+  }
+  
+  .border-dark {
+    border-color: var(--color-border);
+  }
+  
+  .text-secondary {
+    color: var(--color-text-secondary);
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0D1117;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363D;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #484F58;
+}
+
+/* Selection styling */
+::selection {
+  background: rgba(255, 52, 53, 0.3);
+  color: #C9D1D9;
+}

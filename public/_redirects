@@ -1,0 +1,2 @@
+# 所有路由都回退到 index.html（SPA 支持）
+/* /index.html 200

@@ -1,0 +1,168 @@
+# Peter趋势交易系统 - 开发规范
+
+## 核心规则
+
+### 部署规则（必须遵守）
+**"Test first, deploy after confirmation"**
+- 每次修改后必须先本地测试验证
+- 用户确认无误后才能部署
+- **严禁未经测试直接部署**
+
+### 代码修改流程
+1. 修改代码
+2. 本地构建测试 (`npm run build`)
+3. 向用户说明修改内容
+4. **等待用户确认**
+5. 用户说"部署"后再执行部署
+
+## 项目架构
+
+### 技术栈
+- React + TypeScript + Vite
+- Tailwind CSS + shadcn/ui
+- ECharts (K线图)
+- 东方财富API (主) / 新浪API (备)
+
+### 核心功能模块
+
+#### 1. 指标计算 (src/utils/indicators.ts)
+- **MAHS/EMAHS**: 换手成本计算
+- **CRI**: 恐慌指数 (0-100)
+- **GSI**: 贪婪指数 (0-100)
+- **斜率因子**: MA20/60/225未来5日斜率
+- **趋势强度**: 5级分类 (strong_bull/bull/neutral/bear/strong_bear)
+
+#### 2. 股票池 (src/data/watchlist.ts + src/components/StockPool.tsx)
+- **默认股票池**: 154只关注股票，按行业分类（能源化工、半导体电子、消费食饮等）
+- **StockPool 组件**: 前端股票池面板，支持按分类标签筛选，点击股票直接跳转K线图
+
+#### 3. 信号系统
+
+**前端展示信号** (`src/App.tsx` → `detectSignalsFrontend`):
+- 机会信号：基于低位分位数/趋势回调
+- 风险信号：基于高位分位数/CRI/斜率压力
+- 状态机：panic/trend_down/overbought/normal
+- 产生分析性提示（如"BIAS低于历史80%"、"CRI高位"等），**不直接用于交易决策**
+
+**严格 B/S 信号** (`src/utils/signals.ts` → `detectSignals`):
+- **B(底背离)**: 连续≥2天底背离 + CRI≥60有2天 + 成本偏离<15%有2天
+- **B(恐慌)**: 成本偏离<5% + BIAS<5% + CRI>90
+- **S(顶背离)**: 连续≥2天顶背离 + BIAS>50%
+- **S(贪婪)**: 贪婪>95% + BIAS>90%
+- **与前端K线图B/S标记口径完全一致，邮件/扫描报告只使用此信号**
+
+#### 4. 动态阈值机制（2025-02-26更新）
+```
+超买阈值 (风险信号分级):
+- 强多头: 95%
+- 普通多头: 87%
+- 其他: 80%
+
+超买阈值 (机会信号否决):
+- 固定: 80% (无论趋势如何)
+
+设计原理:
+- 风险信号分级使用动态阈值，强趋势中需要更高分位才触发"极端超买"
+- 机会信号否决使用固定阈值，确保在任意趋势中，BIAS≥80%都关闭买入信号
+- 避免强趋势牛股中反复出现"高位钝化"vs"关注反弹"的矛盾信号
+```
+
+#### 5. 趋势强度评估（2025-02-26新增）
+- **指标**: `trendStrength` + `trendScore`
+- **计算依据**: 均线排列(MA5>MA20>MA60>MA225) + 各周期斜率方向
+- **5级分类**: 
+  - strong_bull (≥70分): 多头排列+斜率向上
+  - bull (40-69分): 部分多头排列
+  - neutral (-40~39分): 震荡
+  - bear (-70~-41分): 空头排列
+  - strong_bear (≤-71分): 全面空头
+
+#### 6. 趋势回调买入信号（2025-02-26新增）
+触发条件:
+- 趋势为strong_bull或bull
+- 价格回踩MA20或MA60的±2%范围内
+- CRI分位<70%（未极端恐慌）
+- 成交量萎缩（VR<0.8）
+- 显示: "趋势回调·MA20支撑 - 关注买入"
+
+### 每日扫描脚本 (scripts/daily-watchlist-scan.ts)
+
+**核心逻辑**: 使用 `detectSignals`（严格B/S），**不使用** `detectSignalsFrontend`。
+
+**输入模式**:
+- 无参数：扫描默认 `getUniqueWatchlist()`（154只）
+- CSV路径：扫描 CSV 中的股票（如 xueqiu_tracker 导出的大V共同关注股票）
+
+**输出过滤**: 只有 `strictSignalType !== null` 的股票才会进入邮件/Excel/控制台输出。
+
+### 关键设计原则
+
+#### 信号冲突处理
+1. **风险优先**: 当风险信号和机会信号冲突时，风险信号优先
+2. **高位否决机会**: BIAS或成本偏离度≥80%时，关闭机会信号
+3. **趋势调节**: 强趋势中提高风险阈值，避免频繁误报
+
+#### 分位数计算
+- 使用**全部历史数据**（非滚动窗口）
+- 线性插值法计算排名
+- 至少需要30个历史数据点
+
+## 测试脚本
+
+### 分位数测试
+```bash
+node test-scripts/test_percentile.mjs
+```
+
+### 常用验证场景
+1. **300308**: BIAS高位回落场景
+2. **600900**: 价格低位+CRI高位场景
+3. **00883.HK**: 强趋势+高位钝化场景
+4. **603605**: 斜率微负场景
+
+## API 限制
+
+### 东方财富
+- 有CORS限制，浏览器端可能失败
+- 失败时自动切换到新浪API
+
+### 新浪API
+- 作为fallback使用
+- 数据格式与东方财富略有不同
+
+## HTTP API Server
+
+启动：`npx tsx scripts/api-server.ts`（端口 3457，可通过 `PORT` 环境变量修改）
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/stock/:code` | GET | 单股查询+指标计算+严格信号检测 |
+| `/api/signals/latest` | GET | 最新扫描结果（Excel） |
+| `/api/watchlist` | GET | 股票池列表（154只） |
+| `/api/scan` | POST | 批量扫描（限10只） |
+| `/health` | GET | 健康检查 |
+
+供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。
+
+## 部署信息
+
+- **前端**: 腾讯云 EdgeOne Pages
+- **构建命令**: `npm run build`
+- **构建输出**: `dist/` 目录
+- **自动部署**: GitHub push 后自动触发 EdgeOne 构建
+- **构建配置**: `edgeone.json`
+- **AI 分析后端**: RebelResearchOS (`research.peistock.win`)，部署在 JD Cloud 服务器，通过 Cloudflare Tunnel 代理
+  - 本地开发时 Vite 代理 `/api/research` → `http://localhost:8000`
+  - 生产环境直接请求 `research.peistock.win`
+
+## 已知问题
+
+### HK 个股流通股索引（2026-05-16 修正）
+
+腾讯 API qt 数组中：
+- `qt[70]` = 流通股本（float 字符串，如 `'95912.000'`）
+- `qt[69]` = 总股本
+
+曾误用 `qt[69]` 导致 DD 值计算为 ~500（应为 ~80）。`src/utils/tencentApi.ts` 已修正为 `qt[70]`。
+
+`src/utils/stockCapital.ts` 已硬编码主要 HK 龙头流通股本作为本地兜底。
