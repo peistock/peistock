@@ -146,9 +146,19 @@ def download_pdf(info_code: str, cache_dir: Path, timeout: int = 30) -> Optional
 
 def extract_pdf_text(pdf_path: Path, max_chars: int = 15000) -> str:
     """
-    用 pdfplumber 提取 PDF 文本。
+    提取研报文本。支持 PDF（pdfplumber）和纯文本文件。
     返回前 max_chars 字符（避免过长）。
     """
+    # 先尝试作为文本文件读取（有些"PDF"链接返回的是 HTML/文本）
+    try:
+        raw = pdf_path.read_bytes()
+        # 如果是纯文本（非二进制PDF头），直接解码
+        if not raw.startswith(b'%PDF'):
+            text = raw.decode('utf-8', errors='ignore')
+            return text[:max_chars]
+    except Exception:
+        pass
+
     pdfplumber = _safe_import_pdfplumber()
     if pdfplumber is None:
         logger.warning("[research_report] pdfplumber 未安装，跳过 PDF 解析")
@@ -170,30 +180,46 @@ def extract_pdf_text(pdf_path: Path, max_chars: int = 15000) -> str:
 
 # ── LLM 提取客观数据 ──────────────────────────────────────────────────────────
 
-_OBJECTIVE_EXTRACTION_PROMPT = """你是一位严谨的数据提取专员。请从以下券商研报文本中提取「客观事实数据」，严格排除所有主观观点和投资建议。
+_OBJECTIVE_EXTRACTION_PROMPT = """你是一位严谨的数据提取专员。请从以下券商研报文本中提取「客观事实数据」，严格排除所有主观观点、投资建议和盈利预测。
 
 研报标题：{title}
 发布机构：{org}
 发布日期：{date}
 
-【提取规则】
-需要提取的内容（客观事实）：
-1. 行业市场规模、增速、渗透率、产量/销量数据
-2. 产业链上下游关键数据（产能、产能利用率、库存、价格走势）
-3. 公司/行业经营数据（用户数、MAU、ARPU、市占率、门店数、产能）
-4. 宏观经济/行业前置指标（PMI、CPI、PPI、社零、固定资产投资等）
-5. 政策变化、法规变动（客观描述，不含解读）
+【必须提取的内容——按优先级排序】
+**A. 行业层面客观数据（优先级最高）**
+- 行业市场规模（全球/中国）、增速、渗透率
+- 产业链上下游关键数据：产能、产能利用率、库存、价格走势
+- 竞争格局：市占率排名、主要玩家份额
+- 行业前置指标：存储芯片价格指数、DRAM/NAND 价格、晶圆代工价格、PMI等
 
-必须排除的内容（主观观点）：
-- 投资评级（买入/增持/中性/减持/卖出）
-- 目标价、盈利预测（EPS、净利润预测）
+**B. 公司层面客观数据（已披露的历史数据）**
+- 营收、净利润、毛利率、净利率（已披露的财报数据）
+- 销量/出货量、用户数、产能
+
+**C. 宏观经济/政策**
+- 相关宏观指标、政策变化（客观描述，不含解读）
+
+【必须排除的内容】
+- 投资评级、目标价
+- 盈利预测表格（如"2026E 2027E 2028E"的未来预测数据）
 - 投资建议、核心观点、投资结论
 - 「看好」「推荐」「建议」「维持」「上调」等主观措辞
 - 风险描述中带有倾向性的语言
 
 【输出格式】
-只输出提取到的客观数据 bullet list。如果文本中没有可提取的客观数据，输出"(无客观数据)".
-每条数据尽量保留原始数字和单位。
+按以下分类输出，每个分类下用 bullet list：
+
+**行业数据**
+- ...
+
+**公司数据**
+- ...
+
+**宏观/政策**
+- ...
+
+如果没有某类数据，该类输出"(无)"。严禁输出盈利预测表格。
 
 ---
 
@@ -238,27 +264,65 @@ def extract_objective_data(text: str, title: str = "", org: str = "", date: str 
 
 
 def _rule_extract_objective(text: str) -> str:
-    """规则提取：找含数字+行业/市场关键词的句子。"""
+    """规则提取：找含数字+行业/市场关键词的句子，过滤盈利预测表格。"""
     lines = []
-    # 关键词：市场规模、增速、产量、销量、产能、利用率、渗透率、用户数、MAU、市占率
-    keywords = re.compile(
-        r"(?:市场规模|行业规模|市场容量|增速|同比增长|同比下降|复合增长率|CAGR|"
-        r"产量|销量|出货量|产能|产能利用率|开工率|库存|渗透率|市占率|市场份额|"
-        r"用户数|MAU|DAU|ARPU|客单价|门店数|网点数|固定资产|研发投入|营收|收入|"
-        r"PMI|CPI|PPI|社零|固定资产投资|M2|GDP)",
+    lines_industry = []
+    lines_company = []
+    # 行业关键词（优先级高）
+    ind_keywords = re.compile(
+        r"(?:全球|中国|行业|产业|市场|规模|容量|增速|增长|复合|CAGR|"
+        r"半导体|存储|芯片|DRAM|NAND|NOR|MCU|模拟|代工|晶圆|"
+        r"产能|产量|销量|出货量|库存|价格|指数|渗透率|市占率|份额|"
+        r"WSTS|Gartner|ICInsights|弗若斯特沙利文|赛迪|"
+        r"PMI|CPI|PPI|社零|固定资产投资)",
         re.IGNORECASE,
     )
-    # 找含数字的句子
-    num_pattern = re.compile(r"[+-]?\d+\.?\d*%?")
+    # 公司关键词
+    co_keywords = re.compile(
+        r"(?:营收|收入|净利润|毛利|净利率|毛利率|归母|扣非|"
+        r"同比|环比|销量|出货量|产量|产能)",
+        re.IGNORECASE,
+    )
+    # 排除盈利预测表格行（连续多列数字，含E/预测年份）
+    forecast_pattern = re.compile(r"\d{4}E?\s+[\d,]+\s+[\d,]+\s+[\d,]+")
+    # 排除投资建议行
+    advice_pattern = re.compile(r"(?:买入|增持|中性|减持|卖出|评级|目标价|投资建议)")
+    num_pattern = re.compile(r"[+-]?\d+\.?\d*[%亿万美元元]")
+
     for para in text.split("\n"):
         para = para.strip()
-        if len(para) < 10 or len(para) > 300:
+        if len(para) < 15 or len(para) > 250:
             continue
-        if keywords.search(para) and num_pattern.search(para):
-            lines.append(f"- {para}")
-        if len(lines) >= 20:
-            break
-    return "\n".join(lines) if lines else "(无客观数据)"
+        # 跳过盈利预测表格
+        if forecast_pattern.search(para):
+            continue
+        # 跳过投资建议
+        if advice_pattern.search(para):
+            continue
+        # 跳过纯数字表格行
+        if re.match(r"^[\d\s,\.\-%]+$", para):
+            continue
+        has_num = bool(num_pattern.search(para))
+        if has_num and ind_keywords.search(para):
+            lines_industry.append(f"- {para}")
+        elif has_num and co_keywords.search(para):
+            lines_company.append(f"- {para}")
+
+    # 去重
+    seen = set()
+    result = []
+    for item in lines_industry[:12] + lines_company[:8]:
+        key = re.sub(r"\s+", "", item)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+
+    if not result:
+        return "(无客观数据)"
+
+    header = "**行业数据**\n" if lines_industry else ""
+    body = "\n".join(result)
+    return header + body
 
 
 # ── 主入口 ───────────────────────────────────────────────────────────────────
