@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, Star, X, Database, ChevronDown, Loader2 } from 'lucide-react';
+import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockPool from './components/StockPool';
 import StockChart from './components/StockChart';
@@ -14,7 +14,11 @@ import type { StockData, IndicatorData } from './types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { submitAnalysisJob, getTaskStatus } from './utils/researchApi';
+import { submitAnalysisJob, getTaskStatus, getReportHistory, searchStock } from './utils/researchApi';
+import ReportHistory from './components/ReportHistory';
+import type { ReportHistoryItem } from './utils/researchApi';
+import type { StockItem } from './data/watchlist';
+import { getStockPool, addToStockPool, migrateLegacyFavorites } from './data/watchlist';
 // 时间维度类型
 type TimeframeType = 'daily' | 'weekly' | 'min15';
 
@@ -73,6 +77,11 @@ function App() {
   const [showReport, setShowReport] = useState(false);
   const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
+  // 历史观点对比
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyData, setHistoryData] = useState<ReportHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // 当前股票的分析状态（从后台队列派生）
   const currentJob = useMemo(() => {
     if (!stockInfo) return null;
@@ -88,25 +97,32 @@ function App() {
   } : null;
   const aiReport = currentJob?.reportPreview || null;
 
-  // 收藏功能 - 存储代码和名称
-  interface FavoriteItem {
-    symbol: string;
-    name: string;
-  }
-  const [favorites, setFavorites] = useState<FavoriteItem[]>(() => {
-    // 从localStorage读取收藏列表
+  // 股票池（localStorage 持久化）
+  const [stockPool, setStockPool] = useState<StockItem[]>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('peter_stock_favorites');
-      return saved ? JSON.parse(saved) : [];
+      // 迁移旧收藏（一次性）
+      migrateLegacyFavorites();
+      return getStockPool();
     }
     return [];
   });
-  const [showFavorites, setShowFavorites] = useState(false);
-  
-  // 保存收藏到localStorage
-  useEffect(() => {
-    localStorage.setItem('peter_stock_favorites', JSON.stringify(favorites));
-  }, [favorites]);
+
+  const refreshPool = useCallback(() => {
+    setStockPool(getStockPool());
+  }, []);
+
+  const inPool = stockInfo ? stockPool.some(s => s.code === stockInfo.symbol) : false;
+
+  const handleTogglePool = useCallback(() => {
+    if (!stockInfo || inPool) return;
+    addToStockPool({
+      code: stockInfo.symbol,
+      name: stockInfo.name,
+      market: stockInfo.market === '港股' ? 'HK' : stockInfo.market === '美股' ? 'US' : 'SH',
+      category: '其他',
+    });
+    refreshPool();
+  }, [stockInfo, inPool, refreshPool]);
   
   // 点击外部关闭数据源下拉框
   useEffect(() => {
@@ -123,19 +139,21 @@ function App() {
     }
   }, [showDataSourceDropdown]);
   
-  // 添加/移除收藏
-  const toggleFavorite = useCallback((symbol: string, name: string) => {
-    setFavorites(prev => {
-      const exists = prev.find(item => item.symbol === symbol);
-      if (exists) {
-        return prev.filter(item => item.symbol !== symbol);
-      }
-      return [...prev, { symbol, name }];
-    });
-  }, []);
-
   const handleSearch = useCallback(async (input: string) => {
-    const symbol = formatSymbol(input);
+    let symbol = formatSymbol(input);
+
+    // 名称/拼音搜索：非纯数字代码格式时，先调用搜索接口解析代码
+    const looksLikeCode = /^\d{4,6}$/.test(symbol);
+    if (!looksLikeCode) {
+      const resp = await searchStock(input.trim());
+      if (resp.code) {
+        symbol = resp.code;
+      } else {
+        setError(`未找到与 "${input.trim()}" 匹配的股票，请检查名称或代码`);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     setCurrentSymbol(symbol);
@@ -248,12 +266,6 @@ function App() {
     }
   }, []);
   
-  // 从收藏快速搜索（放在handleSearch之后避免依赖问题）
-  const searchFromFavorite = useCallback((item: FavoriteItem) => {
-    handleSearch(item.symbol);
-    setShowFavorites(false);
-  }, [handleSearch]);
-
   // AI 投研分析 — 提交任务到后台队列
   const handleAnalyze = useCallback(async () => {
     if (!stockInfo) return;
@@ -317,6 +329,21 @@ function App() {
       setError(`AI分析失败: ${e.message || '请检查后端服务是否启动'}`);
     }
   }, [stockInfo, backgroundJobs]);
+
+  // 加载历史观点对比数据
+  const loadHistory = useCallback(async () => {
+    if (!stockInfo) return;
+    setHistoryLoading(true);
+    try {
+      const resp = await getReportHistory(stockInfo.symbol);
+      setHistoryData(resp.history || []);
+    } catch (e: any) {
+      console.error('加载历史报告失败', e);
+      setHistoryData([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [stockInfo]);
 
   // 后台轮询 — 独立于当前显示的股票
   useEffect(() => {
@@ -441,58 +468,6 @@ function App() {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* 收藏按钮 */}
-              <div className="relative">
-                <button 
-                  onClick={() => setShowFavorites(!showFavorites)}
-                  className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-[#E3B341] transition-colors"
-                >
-                  <Star className={`w-4 h-4 ${favorites.length > 0 ? 'fill-[#E3B341] text-[#E3B341]' : ''}`} />
-                  收藏{favorites.length > 0 && `(${favorites.length})`}
-                </button>
-                
-                {/* 收藏列表下拉 */}
-                {showFavorites && (
-                  <div className="absolute right-0 top-full mt-2 w-48 bg-[#161B22] border border-[#30363D] rounded-lg shadow-xl z-50">
-                    <div className="p-2 border-b border-[#30363D] flex items-center justify-between">
-                      <span className="text-xs text-[#8B949E]">我的收藏</span>
-                      <button 
-                        onClick={() => setShowFavorites(false)}
-                        className="text-[#8B949E] hover:text-white"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                    {favorites.length === 0 ? (
-                      <div className="p-3 text-xs text-[#8B949E]">暂无收藏</div>
-                    ) : (
-                      <div className="max-h-48 overflow-y-auto">
-                        {favorites.map(item => (
-                          <div 
-                            key={item.symbol}
-                            className="flex items-center justify-between px-3 py-2 hover:bg-[#0D1117] cursor-pointer group"
-                            onClick={() => searchFromFavorite(item)}
-                          >
-                            <span className="text-sm text-[#C9D1D9] flex-1">
-                              {item.name}
-                            </span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleFavorite(item.symbol, item.name);
-                              }}
-                              className="text-[#8B949E] hover:text-[#FF3435] opacity-0 group-hover:opacity-100 transition-opacity px-2"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              
               {/* 数据源选择器 */}
               <div className="relative" data-datasource-dropdown>
                 <button 
@@ -625,8 +600,8 @@ function App() {
             onSearch={handleSearch}
             loading={loading}
             stockInfo={stockInfo}
-            isFavorite={stockInfo ? favorites.some(f => f.symbol === stockInfo.symbol) : false}
-            onToggleFavorite={stockInfo ? () => toggleFavorite(stockInfo.symbol, stockInfo.name) : undefined}
+            inPool={inPool}
+            onTogglePool={handleTogglePool}
             aiDecision={aiDecision}
             onAnalyze={handleAnalyze}
             analyzing={analyzing}
@@ -634,9 +609,54 @@ function App() {
             aiReport={aiReport}
             showReport={showReport}
             onToggleReport={() => setShowReport(v => !v)}
-            extra={<StockPool onSelect={handleSearch} />}
+            extra={<StockPool pool={stockPool} onPoolChange={refreshPool} onSelect={handleSearch} />}
           />
         </section>
+
+        {/* 历史观点对比 */}
+        {stockInfo && (
+          <section className="mb-6">
+            <div className="bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden">
+              <button
+                onClick={() => {
+                  const next = !showHistory;
+                  setShowHistory(next);
+                  if (next && historyData.length === 0) {
+                    loadHistory();
+                  }
+                }}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm text-[#8B949E] hover:text-white hover:bg-[#0D1117] transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-[#D2A8FF]" />
+                  <span>历史观点对比</span>
+                  {historyData.length > 0 && (
+                    <span className="text-xs text-[#8B949E]">
+                      ({historyData.length} 次分析)
+                    </span>
+                  )}
+                </div>
+                {showHistory ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </button>
+              {showHistory && (
+                <div className="px-4 py-3 border-t border-[#30363D]">
+                  {historyLoading ? (
+                    <div className="flex items-center justify-center py-8 gap-2 text-[#8B949E] text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      加载历史数据中...
+                    </div>
+                  ) : (
+                    <ReportHistory data={historyData} />
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Error Alert */}
         {error && (

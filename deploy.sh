@@ -22,6 +22,9 @@ rsync -avz \
 echo "==> 检查远程 .env"
 ssh "${HOST}" "test -f ${REMOTE_DIR}/.env || echo 'WARN: 远程缺少 .env 文件'"
 
+echo "==> 安装新依赖（pdfplumber 等）"
+ssh "${HOST}" "cd ${REMOTE_DIR} && .venv/bin/pip install -r requirements.txt -q"
+
 echo "==> 重启 API 服务"
 ssh "${HOST}" "
   cd ${REMOTE_DIR}

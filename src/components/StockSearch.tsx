@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Star, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Database, Clock, Star, Plus, Check, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { formatCapital } from '@/utils/indicators';
@@ -17,8 +17,8 @@ interface StockSearchProps {
     changePercent: number;
     capital: number;
   } | null;
-  isFavorite?: boolean;
-  onToggleFavorite?: () => void;
+  inPool?: boolean;
+  onTogglePool?: () => void;
   // AI 分析
   aiDecision?: {
     decision: string;
@@ -46,7 +46,7 @@ interface RecentSearch {
 }
 
 const StockSearch = ({
-  onSearch, loading, stockInfo, isFavorite, onToggleFavorite,
+  onSearch, loading, stockInfo, inPool, onTogglePool,
   aiDecision, onAnalyze, analyzing, analyzeProgress, aiReport, showReport, onToggleReport, extra,
 }: StockSearchProps) => {
   const [symbol, setSymbol] = useState('');
@@ -237,16 +237,29 @@ const StockSearch = ({
 
           <div className="w-px h-8 bg-[#30363D]" />
 
-          {/* 收藏按钮 */}
-          {onToggleFavorite && (
+          {/* 加入股票池 */}
+          {onTogglePool && (
             <button
-              onClick={onToggleFavorite}
-              className="p-2 rounded-lg border border-[#30363D] hover:border-[#E3B341] transition-colors"
-              title={isFavorite ? '取消收藏' : '添加收藏'}
+              onClick={onTogglePool}
+              disabled={inPool}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-colors text-xs font-medium ${
+                inPool
+                  ? 'border-[#03B172]/30 bg-[#03B172]/10 text-[#03B172] cursor-default'
+                  : 'border-[#30363D] hover:border-[#03B172] text-[#8B949E] hover:text-[#03B172]'
+              }`}
+              title={inPool ? '已在股票池' : '加入股票池'}
             >
-              <Star
-                className={`w-5 h-5 ${isFavorite ? 'fill-[#E3B341] text-[#E3B341]' : 'text-[#8B949E]'}`}
-              />
+              {inPool ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  已在池
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  股票池
+                </>
+              )}
             </button>
           )}
 

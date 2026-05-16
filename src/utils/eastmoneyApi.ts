@@ -235,6 +235,30 @@ export function formatCapital(capital: number): string {
 }
 
 /**
+ * 通过名称/拼音搜索股票代码
+ * @param keyword 股票名称、拼音或代码片段
+ * @returns 匹配的股票代码，未找到时返回 null
+ */
+export async function searchStockByName(keyword: string): Promise<string | null> {
+  const encoded = encodeURIComponent(keyword);
+  const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encoded}&type=14&count=5`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`搜索失败: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const items = data?.QuotationCodeTable?.Data;
+  if (!items || items.length === 0) {
+    return null;
+  }
+
+  // 返回第一个匹配结果的代码
+  return items[0].Code as string;
+}
+
+/**
  * 热门股票列表
  */
 export const POPULAR_SYMBOLS = [

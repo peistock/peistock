@@ -48,6 +48,11 @@ export async function getRoles() {
   return fetchJSON(`/roles`);
 }
 
+/** 通过名称/拼音搜索股票代码（走后端代理，绕过 CORS） */
+export async function searchStock(keyword: string): Promise<{ code: string | null; name: string | null; market: string | null; error?: string }> {
+  return fetchJSON(`/search/stock?q=${encodeURIComponent(keyword)}`);
+}
+
 export interface DecisionItem {
   file: string;
   code: string;
@@ -70,4 +75,29 @@ export interface ClaimItem {
   content: string;
   confidence: number;
   age_days: number;
+}
+
+export interface ReportHistoryItem {
+  date: string;
+  decision: string;
+  conviction: number;
+  price: number | null;
+  change_pct: number | null;
+  reports: {
+    bull: string;
+    bear: string;
+    preemption: string;
+    chair_debate: string;
+  };
+}
+
+export interface ReportHistoryResponse {
+  code: string;
+  count: number;
+  history: ReportHistoryItem[];
+}
+
+/** 查询个股历史 AI 分析报告 */
+export async function getReportHistory(code: string): Promise<ReportHistoryResponse> {
+  return fetchJSON(`/stock/${code}/report-history`);
 }

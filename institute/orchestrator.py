@@ -51,6 +51,31 @@ class ResearchAgentLoop(AgentLoop):
         # 投研场景：分析师已主动调用搜索工具，guardrail 不再需要
         return False
 
+    def _build_max_iter_reply(self) -> str:
+        """覆盖：迭代超限时返回专业话术，禁止输出'刚子AI分身'或'请回复继续'。"""
+        # 检查工作目录是否有写入的文件
+        files = []
+        try:
+            for p in self.work_dir.rglob("*"):
+                if p.is_file() and p.stat().st_size > 100:
+                    rel = p.relative_to(self.work_dir)
+                    files.append(f"- {rel}（{p.stat().st_size // 1024}KB）")
+        except Exception:
+            pass
+
+        if files:
+            file_list = "\n".join(files[:5])
+            return (
+                f"报告已输出至工作目录，但当前回复未包含完整内容。\n\n"
+                f"已生成文件：\n{file_list}\n\n"
+                f"请查阅上述文件获取完整分析。"
+            )
+
+        return (
+            "（分析迭代次数已达上限，但报告内容未正常输出。"
+            "请检查预注入数据是否充分，或联系技术排查。）"
+        )
+
 
 class AnalystRole:
     """分析师角色定义（从 YAML 加载）"""
@@ -425,7 +450,6 @@ class ResearchInstitute:
         for _no_write in ("write_file", "execute_code", "pip_install", "md_to_pdf"):
             toolkit._registry._tools.pop(_no_write, None)
             toolkit._registry._meta.pop(_no_write, None)
-
         today = datetime.now().strftime("%Y年%m月%d日")
         system_prompt = self._build_system_prompt(role, today, context=context)
 
@@ -518,10 +542,21 @@ class ResearchInstitute:
         )
 
         try:
-            result = loop.run(messages, max_iterations=30)
+            result = loop.run(messages, max_iterations=8)
             reply = result.get("reply", "")
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
+            # 兜底：强制替换 FamilyMind 人设污染关键词
+            contaminated = "刚子AI分身" in reply or "您回复" in reply or "联系爸爸" in reply
+            if contaminated:
+                reply = (
+                    "（报告生成过程中遇到迭代限制，原始输出被拦截。"
+                    "以下为基于已有数据的最佳努力输出。）\n\n"
+                    + reply.replace("刚子AI分身", "AI分析师")
+                    .replace("您回复「继续」，我接着干～", "")
+                    .replace("您回复『继续』，我就接着把剩下的做完！", "")
+                    .replace("请您稍后再试，或者联系爸爸帮忙看看。", "请稍后再试或联系技术支持。")
+                )
 
             # Fallback：如果 reply 过短，尝试读取工作目录中 LLM 写入的文件
             if len(reply.strip()) < 200:
@@ -685,11 +720,12 @@ class ResearchInstitute:
             "5. 不要输出任何 thinking、reasoning 或 thought 标签，直接输出最终报告",
             "6. 直接在最终回复中输出完整报告全文，不要调用 write_file 工具写入文件",
             "7. 禁止写代码、禁止创建文件、禁止执行脚本——所有分析必须在同一条回复中用自然语言完成",
+            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
         ])
         if role.tools:
-            lines.append(f"8. 你可以使用的工具: {', '.join(role.tools)}")
+            lines.append(f"9. 你可以使用的工具: {', '.join(role.tools)}")
         lines.append(
-            "8. 涉及财报、业绩、营收、利润等财务数据时，必须明确标注数据来源类型："
+            "10. 涉及财报、业绩、营收、利润等财务数据时，必须明确标注数据来源类型："
             "[已发布财报] — 公司正式披露并经审计的数据；"
             "[市场预期/一致预期] — 分析师预测或市场共识，尚未正式发布；"
             "[历史数据] — 过往季度/年度的已发布数据。"

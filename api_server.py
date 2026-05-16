@@ -5,6 +5,7 @@ api_server.py — RROS HTTP API（供 peistock 前端调用）
 运行: PYTHONPATH=~/family-mind uvicorn api_server:app --port 8000
 """
 import os
+import re
 import sys
 import json
 import logging
@@ -259,6 +260,104 @@ def recent_decisions(days: int = 7):
     return {"decisions": results[:days * 3], "count": len(results)}
 
 
+def _extract_summary(md_text: str, max_chars: int = 150) -> str:
+    """从 Markdown 报告中提取核心观点摘要。去掉标题行和开场白话术，取前2段实质内容。"""
+    if not md_text:
+        return ""
+
+    # 开场白话术过滤（中文）：只要以这些词开头，整段跳过
+    filler_patterns = re.compile(
+        r"^(现在我已|现在我已经|现在让我|让我|以下为|基于当前|基于以上|基于前述|基于已有|根据以上|根据已有|我将|我已经|我已完成|正在|开始|接下来|首先|综合以上|整理|构建|输出|生成|分析|报告|结论|汇总|总结)",
+        re.IGNORECASE,
+    )
+
+    paragraphs = []
+    for line in md_text.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("---"):
+            continue
+        # 去掉 Markdown 粗体/斜体标记，保留纯文本
+        clean = re.sub(r"\*\*|__|\*|_|`", "", line)
+        if not clean or len(clean) < 15:
+            continue
+        # 跳过开场白：只要整句以 filler 开头，不管后面有什么
+        if filler_patterns.search(clean):
+            continue
+        paragraphs.append(clean)
+
+    text = " ".join(paragraphs[:2])
+    if len(text) > max_chars:
+        text = text[:max_chars] + "..."
+    return text
+
+
+@app.get("/api/stock/{code}/report-history")
+def report_history(code: str, limit: int = 30):
+    """查询个股历史 AI 分析报告，返回按日期倒序的摘要列表。
+
+    关联逻辑：以 archives 中的报告日期为准（因为每次分析产生4份报告+1个决策卡），
+    再尝试匹配同日期决策卡获取元数据。
+    """
+    decisions_dir = ROOT / "data" / "stock_decisions"
+    history = []
+
+    # 1. 遍历 archives，收集该 code 的所有报告日期
+    report_dates = set()
+    for p in ARCHIVE_DIR.glob(f"*_{code}_*.md"):
+        parts = p.name.split("_")
+        if len(parts) >= 3 and parts[1] == code:
+            date_str = parts[0]
+            if date_str.isdigit() and len(date_str) == 8:
+                report_dates.add(date_str)
+
+    # 2. 按日期倒序，逐个组装
+    for date_str in sorted(report_dates, reverse=True)[:limit]:
+        try:
+            # 读取4份报告
+            reports = {}
+            for slug in ("bull", "bear", "preemption", "chair_debate"):
+                report_path = ARCHIVE_DIR / f"{date_str}_{code}_{slug}.md"
+                if report_path.exists():
+                    md = report_path.read_text(encoding="utf-8")
+                    reports[slug] = _extract_summary(md)
+                else:
+                    reports[slug] = ""
+
+            # 尝试匹配同日期决策卡
+            card_path = decisions_dir / f"{code}_{date_str}.json"
+            decision = "unknown"
+            conviction = 0
+            price = None
+            change_pct = None
+            if card_path.exists():
+                try:
+                    card = json.loads(card_path.read_text(encoding="utf-8"))
+                    decision = card.get("decision", "unknown")
+                    conviction = card.get("conviction", 0)
+                    price = card.get("price")
+                    change_pct = card.get("change_pct")
+                except Exception:
+                    pass
+
+            history.append({
+                "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}",
+                "decision": decision,
+                "conviction": conviction,
+                "price": price,
+                "change_pct": change_pct,
+                "reports": reports,
+            })
+        except Exception as e:
+            logger.warning(f"[report-history] 解析失败 {date_str}_{code}: {e}")
+            continue
+
+    return {
+        "code": code,
+        "count": len(history),
+        "history": history,
+    }
+
+
 @app.get("/api/signals/latest")
 def latest_signals():
     """最新异常信号"""
@@ -318,6 +417,34 @@ def list_roles():
             for r in inst.roles.values()
         ]
     }
+
+
+import requests as _requests
+
+
+@app.get("/api/search/stock")
+def search_stock(q: str = ""):
+    """代理东方财富搜索接口，解决浏览器 CORS 限制。"""
+    if not q or not q.strip():
+        return {"code": None, "name": None, "error": "empty query"}
+    try:
+        url = f"https://searchapi.eastmoney.com/api/suggest/get"
+        params = {"input": q.strip(), "type": 14, "count": 5}
+        r = _requests.get(url, params=params, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("QuotationCodeTable", {}).get("Data", [])
+        if not items:
+            return {"code": None, "name": None, "error": "not found"}
+        first = items[0]
+        return {
+            "code": first.get("Code"),
+            "name": first.get("Name"),
+            "market": first.get("SecurityTypeName"),
+        }
+    except Exception as e:
+        logger.warning(f"[search] 失败: {e}")
+        return {"code": None, "name": None, "error": str(e)}
 
 
 if __name__ == "__main__":
