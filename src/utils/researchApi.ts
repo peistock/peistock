@@ -122,7 +122,7 @@ export interface SignalBacktestItem {
   signal_label: string;
   max_gain: number;
   max_drawdown: number;
-  total_return: number;
+  profit_loss_ratio: number;
 }
 
 export interface SignalBacktestMatch {
@@ -133,7 +133,7 @@ export interface SignalBacktestMatch {
   distance: number;
   max_gain: number;
   max_drawdown: number;
-  total_return: number;
+  profit_loss_ratio: number;
 }
 
 export interface SignalBacktestData {
