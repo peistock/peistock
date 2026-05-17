@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, Activity, Loader2, ChevronDown, ChevronUp, Target, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Loader2, ChevronDown, ChevronUp, Target, BarChart3 } from 'lucide-react';
 import { getSignalBacktest } from '@/utils/researchApi';
 import type { SignalBacktestItem, SignalBacktestMatch } from '@/utils/researchApi';
 

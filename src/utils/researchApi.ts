@@ -136,7 +136,7 @@ export interface SignalBacktestMatch {
   total_return: number;
 }
 
-export interface SignalBacktestResponse {
+export interface SignalBacktestData {
   code: string;
   current_price: number;
   latest_date: string;
@@ -144,6 +144,13 @@ export interface SignalBacktestResponse {
   latest_cost_dev_pct: number;
   signals: SignalBacktestItem[];
   current_match: SignalBacktestMatch | null;
+}
+
+export interface SignalBacktestResponse {
+  status: string;
+  code: string;
+  data: SignalBacktestData | null;
+  message?: string;
 }
 
 /** 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 */
