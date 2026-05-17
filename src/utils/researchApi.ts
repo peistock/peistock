@@ -87,10 +87,17 @@ export interface ReportHistoryItem {
   price: number | null;
   change_pct: number | null;
   reports: {
+<<<<<<< HEAD
     bull: { summary: string; full: string };
     bear: { summary: string; full: string };
     preemption: { summary: string; full: string };
     chair_debate: { summary: string; full: string };
+=======
+    bull: string;
+    bear: string;
+    preemption: string;
+    chair_debate: string;
+>>>>>>> origin/main
   };
 }
 
@@ -102,6 +109,7 @@ export interface ReportHistoryResponse {
 
 /** 查询个股历史 AI 分析报告 */
 export async function getReportHistory(code: string): Promise<ReportHistoryResponse> {
+<<<<<<< HEAD
   return fetchJSON(`/stock/${code}/report-history?_t=${Date.now()}`);
 }
 
@@ -113,4 +121,7 @@ export async function getBacktestSummary() {
 /** 单股票回测统计 */
 export async function getBacktestStock(code: string) {
   return fetchJSON(`/backtest/stock/${code}`);
+=======
+  return fetchJSON(`/stock/${code}/report-history`);
+>>>>>>> origin/main
 }

@@ -16,7 +16,10 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { submitAnalysisJob, getTaskStatus, getReportHistory, searchStock } from './utils/researchApi';
 import ReportHistory from './components/ReportHistory';
+<<<<<<< HEAD
 import BacktestPanel from './components/BacktestPanel';
+=======
+>>>>>>> origin/main
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
 import { getStockPool, addToStockPool, migrateLegacyFavorites } from './data/watchlist';
@@ -334,7 +337,10 @@ function App() {
   // 加载历史观点对比数据
   const loadHistory = useCallback(async () => {
     if (!stockInfo) return;
+<<<<<<< HEAD
     setHistoryData([]); // 先清空旧数据
+=======
+>>>>>>> origin/main
     setHistoryLoading(true);
     try {
       const resp = await getReportHistory(stockInfo.symbol);
@@ -623,7 +629,11 @@ function App() {
                 onClick={() => {
                   const next = !showHistory;
                   setShowHistory(next);
+<<<<<<< HEAD
                   if (next) {
+=======
+                  if (next && historyData.length === 0) {
+>>>>>>> origin/main
                     loadHistory();
                   }
                 }}
@@ -660,6 +670,7 @@ function App() {
           </section>
         )}
 
+<<<<<<< HEAD
         {/* AI 决策验证（回测闭环） */}
         {stockInfo && (
           <section className="mb-6">
@@ -667,6 +678,8 @@ function App() {
           </section>
         )}
 
+=======
+>>>>>>> origin/main
         {/* Error Alert */}
         {error && (
           <Alert className="mb-6 bg-[#FF3435]/10 border-[#FF3435]/30">

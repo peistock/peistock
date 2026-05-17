@@ -10,6 +10,7 @@ interface ReportHistoryProps {
   data: ReportHistoryItem[];
 }
 
+<<<<<<< HEAD
 function normalizeReport(report: any): { summary: string; full: string } {
   if (typeof report === 'string') {
     return { summary: report, full: report };
@@ -23,6 +24,8 @@ function normalizeReport(report: any): { summary: string; full: string } {
   return { summary: '', full: '' };
 }
 
+=======
+>>>>>>> origin/main
 const ROLE_LABELS: Record<string, string> = {
   bull: 'Bull',
   bear: 'Bear',
@@ -52,8 +55,13 @@ function DecisionBadge({ decision, conviction }: { decision: string; conviction:
   );
 }
 
+<<<<<<< HEAD
 function ReportCell({ summary, full, role }: { summary: string; full: string; role: string }) {
   if (!summary && !full) {
+=======
+function ReportCell({ text, role }: { text: string; role: string }) {
+  if (!text) {
+>>>>>>> origin/main
     return <span className="text-[#30363D] text-xs">—</span>;
   }
   return (
@@ -61,18 +69,30 @@ function ReportCell({ summary, full, role }: { summary: string; full: string; ro
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="cursor-help">
+<<<<<<< HEAD
             <p className="text-[13px] text-[#C9D1D9] leading-relaxed line-clamp-6">
               {summary || full.slice(0, 150) + "..."}
+=======
+            <p className="text-[13px] text-[#C9D1D9] leading-relaxed line-clamp-3">
+              {text}
+>>>>>>> origin/main
             </p>
           </div>
         </TooltipTrigger>
         <TooltipContent
           side="bottom"
           align="start"
+<<<<<<< HEAD
           className="max-w-lg bg-[#0D1117] border border-[#30363D] text-[#C9D1D9] text-[13px] leading-relaxed p-3 max-h-[400px] overflow-y-auto"
         >
           <div className={`font-semibold mb-2 ${ROLE_COLORS[role]}`}>{ROLE_LABELS[role]}</div>
           <div className="whitespace-pre-wrap">{full}</div>
+=======
+          className="max-w-md bg-[#0D1117] border border-[#30363D] text-[#C9D1D9] text-[13px] leading-relaxed p-3"
+        >
+          <div className={`font-semibold mb-1 ${ROLE_COLORS[role]}`}>{ROLE_LABELS[role]}</div>
+          {text}
+>>>>>>> origin/main
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -138,6 +158,7 @@ export default function ReportHistory({ data }: ReportHistoryProps) {
                   )}
                 </td>
                 <td className="px-3 py-2.5 align-top">
+<<<<<<< HEAD
                   <ReportCell {...normalizeReport(item.reports.bull)} role="bull" />
                 </td>
                 <td className="px-3 py-2.5 align-top">
@@ -148,6 +169,18 @@ export default function ReportHistory({ data }: ReportHistoryProps) {
                 </td>
                 <td className="px-3 py-2.5 align-top">
                   <ReportCell {...normalizeReport(item.reports.chair_debate)} role="chair_debate" />
+=======
+                  <ReportCell text={item.reports.bull} role="bull" />
+                </td>
+                <td className="px-3 py-2.5 align-top">
+                  <ReportCell text={item.reports.bear} role="bear" />
+                </td>
+                <td className="px-3 py-2.5 align-top">
+                  <ReportCell text={item.reports.preemption} role="preemption" />
+                </td>
+                <td className="px-3 py-2.5 align-top">
+                  <ReportCell text={item.reports.chair_debate} role="chair_debate" />
+>>>>>>> origin/main
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap align-top">
                   <DecisionBadge decision={item.decision} conviction={item.conviction} />
