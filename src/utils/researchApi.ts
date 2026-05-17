@@ -6,7 +6,10 @@
 const API_BASE = import.meta.env.VITE_RESEARCH_API_BASE || '/api/research';
 
 async function fetchJSON(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    ...options,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -84,10 +87,17 @@ export interface ReportHistoryItem {
   price: number | null;
   change_pct: number | null;
   reports: {
+<<<<<<< HEAD
+    bull: { summary: string; full: string };
+    bear: { summary: string; full: string };
+    preemption: { summary: string; full: string };
+    chair_debate: { summary: string; full: string };
+=======
     bull: string;
     bear: string;
     preemption: string;
     chair_debate: string;
+>>>>>>> origin/main
   };
 }
 
@@ -99,5 +109,19 @@ export interface ReportHistoryResponse {
 
 /** 查询个股历史 AI 分析报告 */
 export async function getReportHistory(code: string): Promise<ReportHistoryResponse> {
+<<<<<<< HEAD
+  return fetchJSON(`/stock/${code}/report-history?_t=${Date.now()}`);
+}
+
+/** 全局回测统计 */
+export async function getBacktestSummary() {
+  return fetchJSON(`/backtest/summary`);
+}
+
+/** 单股票回测统计 */
+export async function getBacktestStock(code: string) {
+  return fetchJSON(`/backtest/stock/${code}`);
+=======
   return fetchJSON(`/stock/${code}/report-history`);
+>>>>>>> origin/main
 }
