@@ -486,6 +486,19 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
+            # 季度财报核心数据注入（所有角色都需要，禁止基于趋势推演猜测财报）
+            try:
+                from core.financial_data import get_quarterly_financial_for_prompt
+                market = "a" if len(code) == 6 and code.isdigit() else "hk"
+                fin_data = get_quarterly_financial_for_prompt(code, market=market)
+                if fin_data and "⚠️" not in fin_data:
+                    logger.info(f"[{slug}] 预注入季度财报数据: {code}")
+                    messages.append(AgentMessage.user(fin_data))
+                else:
+                    logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
+            except Exception as e:
+                logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+
             # 研报客观数据注入（Bull/Bear/Preemption/Chair 需要，已预取于 context）
             if slug in ("bull", "bear", "preemption", "chair_debate"):
                 rr_data = context.get("research_report_data") if context else None
