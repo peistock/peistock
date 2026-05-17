@@ -12,10 +12,10 @@ from core.indicators import calculate_all_indicators
 from core.signal_detector import detect_signals
 
 
-def _fetch_tencent_klines(code: str) -> Tuple[List[Dict], float]:
+def _fetch_tencent_klines(code: str) -> Tuple[List[Dict], float, int]:
     """
-    直连腾讯 API 获取 K 线数据。
-    返回 (records, current_price)。
+    直连腾讯 API 获取 K 线数据 + 流通股本。
+    返回 (records, current_price, capital)。
     """
     clean = re.sub(r'[^0-9]', '', code)
     if len(clean) == 5:
@@ -73,7 +73,17 @@ def _fetch_tencent_klines(code: str) -> Tuple[List[Dict], float]:
     qt = quote_data["data"][tencent_symbol]["qt"][tencent_symbol]
     current_price = float(qt[3]) if qt[3] else 0
 
-    return records, current_price
+    # 流通股本：港股 qt[70]，A股 qt[72]；值可能是带小数点的字符串
+    capital = 0
+    try:
+        if is_hk:
+            capital = int(float(qt[70])) if qt[70] else 0
+        else:
+            capital = int(float(qt[72])) if qt[72] else 0
+    except Exception:
+        pass
+
+    return records, current_price, capital
 
 
 def _detect_signals_for_day(indicators: List[Dict], idx: int) -> Dict:
@@ -225,10 +235,13 @@ def _calc_hold_stats(prices: List[float], entry_idx: int, is_short: bool = False
 
         total_return = (prices[-1] / entry_price - 1) * 100
 
+    # 盈亏比 = 最大收益 / |最大回撤|
+    pl_ratio = round(max_gain / abs(max_drawdown), 2) if max_drawdown != 0 else round(max_gain, 2)
+
     return {
         "max_gain": round(max_gain, 2),
         "max_drawdown": round(max_drawdown, 2),
-        "total_return": round(total_return, 2),
+        "profit_loss_ratio": pl_ratio,
     }
 
 
@@ -251,7 +264,7 @@ def run_signal_backtest(code: str) -> Optional[Dict]:
                     "signal_label": str,
                     "max_gain": float,
                     "max_drawdown": float,
-                    "total_return": float,
+                    "profit_loss_ratio": float,
                 }
             ],
             "current_match": {
@@ -262,19 +275,13 @@ def run_signal_backtest(code: str) -> Optional[Dict]:
                 "distance": float,
                 "max_gain": float,
                 "max_drawdown": float,
-                "total_return": float,
+                "profit_loss_ratio": float,
             } | None
         }
     """
-    records, current_price = _fetch_tencent_klines(code)
+    records, current_price, capital = _fetch_tencent_klines(code)
 
-    # 获取流通股本（简化：尝试用 DataLayer，失败则用常见默认值）
-    capital = 0
-    try:
-        from core.data_layer import DataLayer
-        capital = DataLayer().get_stock_capital(code)
-    except Exception:
-        pass
+    # 腾讯 API 未返回流通股本时的兜底
     if capital <= 0:
         # 兜底：A 股常见 50 亿股，港股 100 亿股
         clean = re.sub(r'[^0-9]', '', code)

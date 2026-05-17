@@ -112,7 +112,8 @@ rebel_research/
 │   ├── news_fetcher.py      增量市场信息（akshare 个股新闻 / 公告 / 财联社快讯）
 │   ├── research_report.py   东方财富研报抓取与摘要
 │   ├── financial_data.py    季度财报数据获取（akshare 业绩报表）
-│   └── backtest.py          历史回测引擎
+│   ├── backtest.py          历史回测引擎
+│   └── signal_backtest.py   信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期对比
 ├── institute/
 │   ├── orchestrator.py      ResearchInstitute：YAML 角色加载 + 依赖注入 + 研报缓存
 │   ├── vector_store.py      向量存储封装
@@ -133,6 +134,7 @@ rebel_research/
 │   │   ├── StockSearch.tsx  搜索 + AI 分析展示
 │   │   ├── StockChart.tsx   K 线图
 │   │   ├── ReportHistory.tsx 历史 AI 报告对比表格
+│   │   ├── SignalBacktestPanel.tsx 信号级回测看板（逐日 B/S 信号持有统计）
 │   │   └── ...
 │   ├── data/
 │   │   └── watchlist.ts     股票池数据层（localStorage CRUD）

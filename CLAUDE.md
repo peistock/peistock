@@ -27,7 +27,8 @@ cd ~/rebel_research
 **生产部署**（JD Cloud 服务器）：
 ```bash
 cd /opt/rebel_research
-nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > /tmp/api_server.log 2>&1 &
+mkdir -p logs
+nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > logs/api.log 2>&1 &
 ```
 前端通过 Cloudflare Tunnel 代理到 `research.peistock.win`，绕过 JD Cloud 代理屏蔽。
 
@@ -66,10 +67,13 @@ nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > /tmp/api_ser
 | `GET /api/roles` | 列出所有加载的角色 |
 | `GET /api/search/stock?q=` | 代理东方财富搜索（名称/拼音 → 代码） |
 | `GET /api/stock/{code}/report-history` | 查询个股历史 AI 分析报告摘要 |
+| `GET /api/backtest/signals/{code}` | 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 |
+| `GET /api/backtest/summary` | 全局回测统计（按置信度/Preemption 条件分组） |
+| `GET /api/backtest/stock/{code}` | 单股票回测统计和最近交易记录 |
 
 ## 不可触碰区
 
-- **`institute/mind/` 自包含 Agent 运行时**：从 FamilyMind 移植的 `llm_client.py`、`agent_loop.py`、`agent_message.py`、`tools.py` 等模块已全部纳入本项目，不再依赖外部 `~/family-mind`。如需修改 LLM 调用逻辑，直接改 `institute/mind/` 下的文件
+- **`institute/mind/` 自包含 LLM 客户端**：从 FamilyMind 移植的 `llm_client.py` + `agent_message.py`，所有角色统一走单轮调用。如需修改 LLM 调用逻辑，直接改 `institute/mind/llm_client.py`
 - **`data/memory.db`**:SQLite 衰减记忆库,删了等于丢失「观点半衰期」状态。**只能 read + insert + decay**,不要 DROP
 - **`data/decision.json` / `data/stock_decisions/`**:历史决策档,做回测和长期评估用,不要批量清
 - **`config/rebel.yaml` 的阈值**:改之前先看 `core/anomaly_trigger.py` 的判断分支,别只改 yaml 不改代码逻辑
@@ -81,6 +85,7 @@ nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > /tmp/api_ser
 - **个股数据走腾讯 API 直连，不走本地 peistock API**:`institute/orchestrator.py` 的 `_fetch_peistock_data` 优先 HTTP 连本地 peistock API（开发环境），失败后回退到 `_fetch_tencent_indicators` 直连腾讯财经 API（`web.ifzq.gtimg.cn`）获取 K 线 + 实时行情，本地 Python 指标引擎计算。生产环境 JD Cloud 无本地 peistock API，全部走腾讯 API。此设计避免了 akshare /mock 数据导致 AI 报告指标值失真（曾出现 MAHS/EMAHS 30% 偏差、CRI 相差 18 倍的数据质量事故）
 - **`query_peistock` 工具已移除**:原 `query_peistock` 工具让 LLM 自行调用本地 API，但生产环境 Connection Refused 导致分析失败。现已从所有 `roles/*.yaml` 的 tools 列表移除。技术指标由 orchestrator 预注入 prompt，LLM 无需再调工具
 - **AgentLoop 框架已移除**:原 FamilyMind 的多轮对话框架（intent 分类、tool calling 循环、guardrail、todo store）对 RROS 单轮报告场景是纯粹 overhead。现所有角色统一走 `LLMClient.chat_messages()` 单轮调用，`institute/mind/` 从 16 个文件精简到 2 个（`llm_client.py` + `agent_message.py`）
+- **信号级回测看板**:新增 `core/signal_backtest.py`，直连腾讯 API 获取 500 天 K 线，本地 Python 指标引擎逐日检测 B/S 信号，计算每个信号的持有期统计（最大收益、最大回撤、至今收益）。同时用当前 CRI + 成本偏离分位的欧氏距离匹配历史最接近日期做对比回测。前端 `SignalBacktestPanel.tsx` 展示。信号检测逻辑与前端 K 线图严格对齐（底背离只标连续段最后一天、顶背离只标第一天、做空 S 信号逻辑）
 - **季度财报数据预注入**:新增 `core/financial_data.py`，通过 akshare `stock_yjbb_em` 拉取最新季度财报（营收、净利润、同比/环比增速、毛利率、ROE），以 Markdown 格式注入 Bull/Bear/Preemption/Chair 的 prompt。LLM 严禁基于趋势推演猜测财报数据，必须使用已披露的实际数字
 - **个股决策卡先不入 memory.db**:`generate_stock_card` 只写文件,不持久化到衰减记忆。原因:个股卡和市场卡的 `claim_type` 体系还没统一,先存盘观察
 - **api_server 决策卡解析**:Chair 报告生成后，`_generate_stock_decision_card` 从 Markdown 内容正则提取 decision/conviction/thesis/kill_switch 等字段，写入 `data/stock_decisions/<code>_<date>.json`，供 `recent_decisions` 和前端历史报告接口使用

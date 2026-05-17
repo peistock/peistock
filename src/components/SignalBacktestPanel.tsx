@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, Activity, Loader2, ChevronDown, ChevronUp, Target, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Loader2, ChevronDown, ChevronUp, Target, BarChart3 } from 'lucide-react';
 import { getSignalBacktest } from '@/utils/researchApi';
 import type { SignalBacktestItem, SignalBacktestMatch } from '@/utils/researchApi';
 
@@ -20,6 +20,20 @@ interface SignalBacktestPanelProps {
 function formatPct(v: number): string {
   const sign = v >= 0 ? '+' : '';
   return `${sign}${v.toFixed(2)}%`;
+}
+
+function formatRatio(v: number): string {
+  if (typeof v !== 'number' || isNaN(v)) return '—';
+  return v.toFixed(2);
+}
+
+function RatioCell({ value }: { value: number }) {
+  const isGood = typeof value === 'number' && value >= 1;
+  return (
+    <span className={`font-mono font-medium ${isGood ? 'text-[#03B172]' : 'text-[#FF3435]'}`}>
+      {formatRatio(value)}
+    </span>
+  );
 }
 
 function PctCell({ value, reverse = false }: { value: number; reverse?: boolean }) {
@@ -158,10 +172,10 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                       买入价: {data!.current_match.price.toFixed(2)}
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div className="text-center">
-                      <div className="text-[10px] text-[#8B949E]">至今收益</div>
-                      <PctCell value={data!.current_match.total_return} />
+                      <div className="text-[10px] text-[#8B949E]">盈亏比</div>
+                      <RatioCell value={data!.current_match.profit_loss_ratio} />
                     </div>
                     <div className="text-center">
                       <div className="text-[10px] text-[#8B949E]">最大收益</div>
@@ -170,6 +184,10 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                     <div className="text-center">
                       <div className="text-[10px] text-[#8B949E]">最大回撤</div>
                       <PctCell value={data!.current_match.max_drawdown} reverse />
+                    </div>
+                    <div className="text-center">
+                      <div className="text-[10px] text-[#8B949E]">买入价</div>
+                      <span className="font-mono font-medium text-[#C9D1D9]">{data!.current_match.price.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
@@ -185,7 +203,7 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                       <th className="text-right py-1.5 px-1 font-medium">买入价</th>
                       <th className="text-right py-1.5 px-1 font-medium">最大收益</th>
                       <th className="text-right py-1.5 px-1 font-medium">最大回撤</th>
-                      <th className="text-right py-1.5 px-1 font-medium">至今收益</th>
+                      <th className="text-right py-1.5 px-1 font-medium">盈亏比</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#30363D]/40">
@@ -221,7 +239,7 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                           <PctCell value={s.max_drawdown} reverse />
                         </td>
                         <td className="py-1.5 px-1 text-right">
-                          <PctCell value={s.total_return} />
+                          <RatioCell value={s.profit_loss_ratio} />
                         </td>
                       </tr>
                     ))}
@@ -239,10 +257,10 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                     S 信号: {data!.signals.filter(s => s.signal_type === 'S').length} 次
                   </span>
                   <span>
-                    平均至今收益:{' '}
+                    平均盈亏比:{' '}
                     <span className="font-mono">
-                      {formatPct(
-                        data!.signals.reduce((sum, s) => sum + s.total_return, 0) /
+                      {formatRatio(
+                        data!.signals.reduce((sum, s) => sum + s.profit_loss_ratio, 0) /
                           data!.signals.length
                       )}
                     </span>

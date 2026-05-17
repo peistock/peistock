@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Tooltip,
   TooltipContent,
@@ -52,6 +53,7 @@ function DecisionBadge({ decision, conviction }: { decision: string; conviction:
 }
 
 function ReportCell({ summary, full, role }: { summary: string; full: string; role: string }) {
+  const [expanded, setExpanded] = useState(false);
   if (!summary && !full) {
     return <span className="text-[#30363D] text-xs">—</span>;
   }
@@ -59,16 +61,31 @@ function ReportCell({ summary, full, role }: { summary: string; full: string; ro
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="cursor-help">
-            <p className="text-[13px] text-[#C9D1D9] leading-relaxed line-clamp-6">
+          <div
+            className="cursor-pointer select-none"
+            onClick={() => setExpanded(!expanded)}
+          >
+            <p className={`text-[13px] text-[#C9D1D9] leading-relaxed ${expanded ? '' : 'line-clamp-6'}`}>
               {summary || full.slice(0, 150) + "..."}
             </p>
+            {!expanded && full.length > 150 && (
+              <span className="text-[10px] text-[#58A6FF] mt-1 block">点击展开</span>
+            )}
+            {expanded && (
+              <>
+                <div className="mt-2 pt-2 border-t border-[#30363D]/40">
+                  <div className={`font-semibold mb-1 ${ROLE_COLORS[role]}`}>{ROLE_LABELS[role]} 完整报告</div>
+                  <div className="text-[13px] text-[#C9D1D9] leading-relaxed whitespace-pre-wrap">{full}</div>
+                </div>
+                <span className="text-[10px] text-[#58A6FF] mt-1 block">点击收起</span>
+              </>
+            )}
           </div>
         </TooltipTrigger>
         <TooltipContent
           side="bottom"
           align="start"
-          className="max-w-lg bg-[#0D1117] border border-[#30363D] text-[#C9D1D9] text-[13px] leading-relaxed p-3 max-h-[400px] overflow-y-auto"
+          className="max-w-lg bg-[#0D1117] border border-[#30363D] text-[#C9D1D9] text-[13px] leading-relaxed p-3 max-h-[400px] overflow-y-auto hidden md:block"
         >
           <div className={`font-semibold mb-2 ${ROLE_COLORS[role]}`}>{ROLE_LABELS[role]}</div>
           <div className="whitespace-pre-wrap">{full}</div>

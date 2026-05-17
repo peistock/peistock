@@ -60,7 +60,7 @@ _jobs = {}
 _jobs_lock = threading.Lock()
 _bg_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="analyze-")
 # 内部并行复用的线程池（避免每次任务都创建销毁）
-_inner_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="inner-")
+_inner_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="inner-")
 
 
 class _LLMProxy:
@@ -114,9 +114,23 @@ def _generate_stock_decision_card(code: str, date_str: str, chair_content: str):
     decision = _re_search(r"###\s*决策\s*（Decision）\s*\n\s*([A-Z]+)", chair_content)
     if decision and decision not in ("LONG", "SHORT", "NEUTRAL"):
         decision = None
+    if not decision:
+        # fallback：在全文搜索独立出现的 LONG/SHORT/NEUTRAL
+        m = re.search(r"\b(LONG|SHORT|NEUTRAL)\b", chair_content, re.IGNORECASE)
+        if m:
+            decision = m.group(1).upper()
 
     conviction_str = _re_search(r"###\s*信心度\s*（Conviction）\s*\n\s*(\d+)", chair_content)
     conviction = int(conviction_str) if conviction_str else 0
+    if not conviction:
+        # fallback：搜索 "55%"、"信心度 55" 等模式
+        m = re.search(r"(?:信心度|conviction).*?(\d{1,3})\s*%", chair_content, re.IGNORECASE)
+        if m:
+            conviction = int(m.group(1))
+        else:
+            m = re.search(r"\b(\d{1,3})\s*%\s*(?:信心|conviction)", chair_content, re.IGNORECASE)
+            if m:
+                conviction = int(m.group(1))
 
     thesis = _re_search(r"###\s*核心论点\s*（Thesis）\s*\n\s*(.+?)(?=\n###|\n##\s|$)", chair_content)
     if thesis:
