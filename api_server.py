@@ -28,9 +28,7 @@ if FM_ROOT not in sys.path:
     sys.path.insert(0, FM_ROOT)
 
 from dotenv import load_dotenv
-# 先加载 rebel_research 自己的 .env（DeepSeek 配置优先，强制覆盖已有环境变量）
-load_dotenv(os.path.join(ROOT, ".env"), override=True)
-# 再加载 family-mind 的 .env（本地未设置的变量兜底）
+# 项目约定：rebel_research 自身不维护 .env，LLM 配置唯一来源是 family-mind/.env
 load_dotenv(os.path.join(FM_ROOT, ".env"), override=True)
 
 from fastapi import FastAPI
@@ -46,12 +44,15 @@ app.add_middleware(
 )
 
 _institute = None
+_institute_lock = threading.Lock()
 
 def _get_institute():
     global _institute
     if _institute is None:
-        from institute.orchestrator import ResearchInstitute
-        _institute = ResearchInstitute()
+        with _institute_lock:
+            if _institute is None:
+                from institute.orchestrator import ResearchInstitute
+                _institute = ResearchInstitute()
     return _institute
 
 
@@ -64,82 +65,189 @@ def health():
 _jobs = {}
 _jobs_lock = threading.Lock()
 _bg_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="analyze-")
+# 内部并行复用的线程池（避免每次任务都创建销毁）
+_inner_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="inner-")
+
+
+class _LLMProxy:
+    """代理 LLMClient，临时覆盖 reasoning_effort，不影响全局单例。"""
+    __slots__ = ("_llm", "reasoning_effort")
+
+    def __init__(self, llm, reasoning_effort):
+        object.__setattr__(self, "_llm", llm)
+        object.__setattr__(self, "reasoning_effort", reasoning_effort)
+
+    def __getattr__(self, name):
+        return getattr(self._llm, name)
+
+    def __setattr__(self, name, value):
+        if name in ("_llm", "reasoning_effort"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._llm, name, value)
+
+
+def _generate_stock_decision_card(code: str, date_str: str, chair_content: str):
+    """从 Chair 报告中提取结构化决策卡，写入 data/stock_decisions/。"""
+    import re
+
+    def _re_search(pattern, text, flags=re.IGNORECASE | re.DOTALL):
+        m = re.search(pattern, text, flags)
+        return m.group(1).strip() if m else None
+
+    decision = _re_search(r"###\s*决策\s*（Decision）\s*\n\s*([A-Z]+)", chair_content)
+    if decision and decision not in ("LONG", "SHORT", "NEUTRAL"):
+        decision = None
+
+    conviction_str = _re_search(r"###\s*信心度\s*（Conviction）\s*\n\s*(\d+)", chair_content)
+    conviction = int(conviction_str) if conviction_str else 0
+
+    thesis = _re_search(r"###\s*核心论点\s*（Thesis）\s*\n\s*(.+?)(?=\n###|\n##\s|$)", chair_content)
+    if thesis:
+        thesis = thesis.replace("\n", " ").strip()[:300]
+
+    catalyst = _re_search(
+        r"###\s*催化剂\s*/\s*触发条件\s*（Catalyst\s*/\s*Trigger）\s*\n\s*(.+?)(?=\n###|\n##\s|$)",
+        chair_content,
+    )
+    kill_switch = _re_search(
+        r"###\s*止损位\s*（Kill\s*Switch）\s*\n\s*(.+?)(?=\n###|\n##\s|$)", chair_content
+    )
+    max_loss = _re_search(
+        r"###\s*最大损失\s*（Max\s*Loss）\s*\n\s*(.+?)(?=\n###|\n##\s|$)", chair_content
+    )
+    hold_period = _re_search(
+        r"###\s*持有期建议\s*\n\s*(.+?)(?=\n###|\n##\s|$)", chair_content
+    )
+
+    card = {
+        "code": code,
+        "date": date_str,
+        "decision": decision or "unknown",
+        "conviction": conviction,
+        "thesis": thesis or "",
+        "catalyst": catalyst or "",
+        "kill_switch": kill_switch or "",
+        "risk_if_wrong": max_loss or "",
+        "holding_period": hold_period or "",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    out_dir = ROOT / "data" / "stock_decisions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{code}_{date_str}.json"
+    out_path.write_text(json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
 
 
 def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
     """后台执行分析链，结果写入 _jobs。"""
     inst = _get_institute()
     try:
-        # Phase 0: 预取研报客观数据（只取一次，供 Bull/Bear/Preemption 共用）
+        # Phase 0: 预取所有数据（只取一次，供所有角色共享，避免重复调用 akshare）
+        market = "a" if len(code) == 6 and code.isdigit() else "hk"
+
+        # 0a. 研报客观数据
         research_data = ""
+        research_data_available = False
         try:
             from core.research_report import get_research_report_data, summarize_for_prompt
-            market = "a" if len(code) == 6 and code.isdigit() else "hk"
             rr_raw = get_research_report_data(code, market=market, limit=2, llm=inst.llm)
             if rr_raw:
                 research_data = summarize_for_prompt(rr_raw, max_total_chars=2000)
+                research_data_available = True
                 logger.info(f"[{code}] 研报数据已获取: {len(research_data)} 字符")
         except Exception as e:
             logger.warning(f"[{code}] 研报获取失败: {e}")
 
-        ctx = {"code": code, "signal": signal, "research_report_data": research_data}
+        # 0b. 季度财报数据
+        financial_data = ""
+        try:
+            from core.financial_data import get_quarterly_financial_for_prompt
+            financial_data = get_quarterly_financial_for_prompt(code, market=market)
+            logger.info(f"[{code}] 财报数据已预取: {len(financial_data)} 字符")
+        except Exception as e:
+            logger.warning(f"[{code}] 财报预取失败: {e}")
+
+        # 0c. 预期基准数据（业绩预告/历史增速）
+        expectation_data = ""
+        try:
+            from core.financial_data import get_expectation_for_stock
+            expectation_data = get_expectation_for_stock(code, market=market)
+            logger.info(f"[{code}] 预期基准已预取: {len(expectation_data)} 字符")
+        except Exception as e:
+            logger.warning(f"[{code}] 预期基准预取失败: {e}")
+
+        ctx = {
+            "code": code,
+            "signal": signal,
+            "market": market,
+            "research_report_data": research_data,
+            "research_data_available": research_data_available,
+            "financial_data": financial_data,
+            "expectation_data": expectation_data,
+        }
 
         with _jobs_lock:
             _jobs[task_id]["status"] = "running"
             _jobs[task_id]["progress"] = "Bull/Bear 并行分析中..."
 
-        # Phase 1: Bull / Bear 并行
-        original_effort = getattr(inst.llm, "reasoning_effort", None)
-        inst.llm.reasoning_effort = None
+        # Phase 1: Bull / Bear 并行（reasoning_effort=None，线程安全代理）
+        llm_none = _LLMProxy(inst.llm, None)
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {
-                    pool.submit(inst.run_analyst, "bull", date_str, context=ctx): "bull",
-                    pool.submit(inst.run_analyst, "bear", date_str, context=ctx): "bear",
-                }
-                for fut in as_completed(futures):
-                    role = futures[fut]
-                    try:
-                        fut.result()
-                        logger.info(f"[{code}] {role} 分析完成")
-                    except Exception as e:
-                        logger.error(f"[{code}] {role} 分析失败: {e}")
-        finally:
-            inst.llm.reasoning_effort = original_effort
+            futures = {
+                _inner_pool.submit(inst.run_analyst, "bull", date_str, context=ctx, llm=llm_none): "bull",
+                _inner_pool.submit(inst.run_analyst, "bear", date_str, context=ctx, llm=llm_none): "bear",
+            }
+            for fut in as_completed(futures):
+                role = futures[fut]
+                try:
+                    fut.result(timeout=300)
+                    logger.info(f"[{code}] {role} 分析完成")
+                except Exception as e:
+                    logger.error(f"[{code}] {role} 分析失败: {e}")
+        except Exception as e:
+            logger.error(f"[{code}] Phase 1 异常: {e}")
 
         with _jobs_lock:
             _jobs[task_id]["progress"] = "Preemption / Sentiment 并行分析中..."
 
-        # Phase 2: Preemption + Sentiment 并行（均依赖 Bull/Bear）
-        inst.llm.reasoning_effort = "high"
+        # Phase 2: Preemption + Sentiment 并行（reasoning_effort=high）
+        llm_high = _LLMProxy(inst.llm, "high")
         try:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = {
-                    pool.submit(inst.run_analyst, "preemption", date_str, context=ctx): "preemption",
-                    pool.submit(inst.run_analyst, "sentiment", date_str, context=ctx): "sentiment",
-                }
-                for fut in as_completed(futures):
-                    role = futures[fut]
-                    try:
-                        fut.result()
-                        logger.info(f"[{code}] {role} 分析完成")
-                    except Exception as e:
-                        logger.error(f"[{code}] {role} 分析失败: {e}")
-        finally:
-            inst.llm.reasoning_effort = original_effort
+            futures = {
+                _inner_pool.submit(inst.run_analyst, "preemption", date_str, context=ctx, llm=llm_high): "preemption",
+                _inner_pool.submit(inst.run_analyst, "sentiment", date_str, context=ctx, llm=llm_high): "sentiment",
+            }
+            for fut in as_completed(futures):
+                role = futures[fut]
+                try:
+                    fut.result(timeout=300)
+                    logger.info(f"[{code}] {role} 分析完成")
+                except Exception as e:
+                    logger.error(f"[{code}] {role} 分析失败: {e}")
+        except Exception as e:
+            logger.error(f"[{code}] Phase 2 异常: {e}")
 
         with _jobs_lock:
             _jobs[task_id]["progress"] = "Chair 投委会裁决中..."
 
-        # Phase 3: Chair
-        inst.llm.reasoning_effort = "high"
+        # Phase 3: Chair（reasoning_effort=high）
         try:
-            path = inst.run_analyst("chair_debate", date_str, context=ctx)
-        finally:
-            inst.llm.reasoning_effort = original_effort
+            path = inst.run_analyst("chair_debate", date_str, context=ctx, llm=llm_high)
+        except Exception as e:
+            logger.error(f"[{code}] Chair 分析失败: {e}")
+            path = None
 
         if path and path.exists():
             content = path.read_text(encoding="utf-8")
+
+            # 生成决策卡 JSON（供历史接口和 recent_decisions 使用）
+            try:
+                _generate_stock_decision_card(code, date_str, content)
+            except Exception as e:
+                logger.warning(f"[{code}] 决策卡生成失败: {e}")
+
             with _jobs_lock:
                 _jobs[task_id].update({
                     "status": "completed",
@@ -160,7 +268,7 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
                     "progress": "Chair 报告未找到",
                 })
     except Exception as e:
-        logger.error(f"[{code}] 分析任务异常: {e}")
+        logger.error(f"[{code}] 分析任务异常: {e}", exc_info=True)
         with _jobs_lock:
             _jobs[task_id].update({
                 "status": "error",
@@ -169,14 +277,36 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             })
 
 
+def _cleanup_old_jobs():
+    """清理 1 小时前已完成的旧任务，防止 _jobs 无限增长。"""
+    cutoff = datetime.now().timestamp() - 3600
+    with _jobs_lock:
+        expired = [
+            tid for tid, job in _jobs.items()
+            if job.get("status") in ("completed", "error")
+            and datetime.fromisoformat(job.get("created_at", "2000-01-01T00:00:00")).timestamp() < cutoff
+        ]
+        for tid in expired:
+            del _jobs[tid]
+        if expired:
+            logger.info(f"已清理 {len(expired)} 个过期任务")
+
+
 @app.post("/api/analyze/stock/{code}")
 def analyze_stock(code: str, signal: str = "B"):
     """提交分析任务，立即返回 task_id。分析在后台异步执行。"""
+    # 股票代码预校验
+    if not (code.isdigit() and (len(code) == 6 or len(code) == 5)):
+        return {"status": "error", "detail": f"无效股票代码: {code}，应为 6 位 A 股或 5 位港股"}
+
+    _cleanup_old_jobs()
     date_str = datetime.now().strftime("%Y%m%d")
 
-    # 检查当天是否已有 Chair 报告缓存
+    # 检查当天是否已有完整报告缓存（5 份报告全部存在才命中）
+    _slugs = ("bull", "bear", "preemption", "sentiment", "chair_debate")
+    _all_exist = all((ARCHIVE_DIR / f"{date_str}_{code}_{s}.md").exists() for s in _slugs)
     cache_path = ARCHIVE_DIR / f"{date_str}_{code}_chair_debate.md"
-    if cache_path.exists():
+    if _all_exist and cache_path.exists():
         content = cache_path.read_text(encoding="utf-8")
         task_id = f"cached_{code}_{date_str}"
         with _jobs_lock:
@@ -220,6 +350,7 @@ def analyze_stock(code: str, signal: str = "B"):
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str):
     """轮询查询分析任务状态与结果。"""
+    _cleanup_old_jobs()
     with _jobs_lock:
         job = _jobs.get(task_id)
     if not job:
@@ -261,26 +392,80 @@ def recent_decisions(days: int = 7):
 
 
 def _extract_summary(md_text: str, max_chars: int = 150) -> str:
-    """从 Markdown 报告中提取核心观点摘要。去掉标题行和开场白话术，取前2段实质内容。"""
+    """从 Markdown 报告中提取核心观点摘要。优先提取 ## 核心论点/预判结论/核心裁决 等章节，
+    其次提取 ## 预期差分析 / 三维度对比摘要，最后回退到前2段实质内容。"""
     if not md_text:
         return ""
 
-    # 开场白话术过滤（中文）：只要以这些词开头，整段跳过
+    # 0. 最高优先：报告末尾显式生成的核心摘要（角色 prompt 已要求 LLM 输出）
+    m = re.search(r"##\s*核心摘要.*?\n(.*?)(?=\n## |\n---|\Z)", md_text, re.DOTALL | re.IGNORECASE)
+    if m:
+        text = _clean_md_paragraphs(m.group(1), max_chars)
+        if text:
+            return text
+
+    # 1. 优先：提取核心论点/论据/结论类章节
+    core_sections = [
+        r"##\s*核心论点.*?\n(.*?)(?=\n## |\n---|\Z)",
+        r"##\s*核心论据.*?\n(.*?)(?=\n## |\n---|\Z)",
+        r"##\s*预判结论.*?\n(.*?)(?=\n## |\n---|\Z)",
+        r"##\s*核心裁决.*?\n(.*?)(?=\n## |\n---|\Z)",
+    ]
+    for pattern in core_sections:
+        m = re.search(pattern, md_text, re.DOTALL | re.IGNORECASE)
+        if m:
+            text = _clean_md_paragraphs(m.group(1), max_chars)
+            if text:
+                return text
+
+    # 2. 其次：Preemption 专用 — 预期差分析、信息消化评估
+    preemption_sections = [
+        r"##\s*预期差分析.*?\n(.*?)(?=\n## |\n---|\Z)",
+        r"##\s*信息消化评估.*?\n(.*?)(?=\n## |\n---|\Z)",
+    ]
+    for pattern in preemption_sections:
+        m = re.search(pattern, md_text, re.DOTALL | re.IGNORECASE)
+        if m:
+            text = _clean_md_paragraphs(m.group(1), max_chars)
+            if text:
+                return text
+
+    # 3. Chair 专用 — 三维度对比摘要（取表格后的核心论据列）
+    m = re.search(r"##\s*三维度对比摘要.*?\n(.*?)(?=\n## |\n---|\Z)", md_text, re.DOTALL | re.IGNORECASE)
+    if m:
+        # 提取表格中 "核心论据" 行的内容
+        table_text = m.group(1)
+        for line in table_text.split("\n"):
+            if "核心论据" in line and "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                # 格式: 核心论据 | bull内容 | bear内容 | preemption内容
+                if len(parts) >= 4:
+                    pieces = [p for p in parts[1:] if p and not p.startswith("-")]
+                    text = " | ".join(pieces)
+                    if len(text) > max_chars:
+                        text = text[:max_chars] + "..."
+                    return text
+
+    # 4. 回退：取前2段实质内容
+    return _clean_md_paragraphs(md_text, max_chars)
+
+
+def _clean_md_paragraphs(md_text: str, max_chars: int = 150) -> str:
+    """清理 Markdown 标记，取前2段有效文字。"""
     filler_patterns = re.compile(
-        r"^(现在我已|现在我已经|现在让我|让我|以下为|基于当前|基于以上|基于前述|基于已有|根据以上|根据已有|我将|我已经|我已完成|正在|开始|接下来|首先|综合以上|整理|构建|输出|生成|分析|报告|结论|汇总|总结)",
+        r"^(现在我已|现在我已经|现在让我|让我开始|让我为您|让我来|以下为|基于当前|基于以上|基于前述|根据以上|根据已有|我将为您|我已经完成|我已完成|正在分析|开始分析|接下来我|综合以上信息|整理如下|构建完成|输出如下|生成报告|分析报告|结论如下|汇总如下|总结如下|标的：|日期：|收盘价：)",
         re.IGNORECASE,
     )
 
     paragraphs = []
     for line in md_text.split("\n"):
         line = line.strip()
-        if not line or line.startswith("#") or line.startswith("---"):
+        if not line or line.startswith("#") or line.startswith("---") or line.startswith("|"):
             continue
-        # 去掉 Markdown 粗体/斜体标记，保留纯文本
+        # 去掉 Markdown 粗体/斜体/代码标记
         clean = re.sub(r"\*\*|__|\*|_|`", "", line)
         if not clean or len(clean) < 15:
             continue
-        # 跳过开场白：只要整句以 filler 开头，不管后面有什么
         if filler_patterns.search(clean):
             continue
         paragraphs.append(clean)
@@ -313,15 +498,18 @@ def report_history(code: str, limit: int = 30):
     # 2. 按日期倒序，逐个组装
     for date_str in sorted(report_dates, reverse=True)[:limit]:
         try:
-            # 读取4份报告
+            # 读取5份报告（summary 用于表格，full 用于 Tooltip）
             reports = {}
-            for slug in ("bull", "bear", "preemption", "chair_debate"):
+            for slug in ("bull", "bear", "preemption", "sentiment", "chair_debate"):
                 report_path = ARCHIVE_DIR / f"{date_str}_{code}_{slug}.md"
                 if report_path.exists():
                     md = report_path.read_text(encoding="utf-8")
-                    reports[slug] = _extract_summary(md)
+                    reports[slug] = {
+                        "summary": _extract_summary(md),
+                        "full": md,
+                    }
                 else:
-                    reports[slug] = ""
+                    reports[slug] = {"summary": "", "full": ""}
 
             # 尝试匹配同日期决策卡
             card_path = decisions_dir / f"{code}_{date_str}.json"
@@ -445,6 +633,53 @@ def search_stock(q: str = ""):
     except Exception as e:
         logger.warning(f"[search] 失败: {e}")
         return {"code": None, "name": None, "error": str(e)}
+
+
+# ---------- 回测闭环 API ----------
+
+@app.post("/api/backtest/validate")
+def trigger_backtest_validation():
+    """手动触发验证所有待处理的决策卡，计算实际盈亏。"""
+    try:
+        from core.backtest_tracker import validate_pending_decisions
+        result = validate_pending_decisions()
+        return {
+            "status": "ok",
+            "validated": result.get("validated", 0),
+            "skipped": result.get("skipped", 0),
+            "errors": result.get("errors", 0),
+        }
+    except Exception as e:
+        logger.error(f"[backtest/validate] 失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/backtest/summary")
+def backtest_summary():
+    """全局回测统计：按置信度、Preemption 等条件分组。"""
+    try:
+        from core.backtest_tracker import get_condition_stats
+        stats = get_condition_stats(min_samples=1)
+        if not stats:
+            return {"status": "ok", "message": "暂无足够验证数据", "stats": {}}
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        logger.error(f"[backtest/summary] 失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/backtest/stock/{code}")
+def backtest_stock(code: str):
+    """某股票的历史验证统计和最近交易记录。"""
+    try:
+        from core.backtest_tracker import get_stock_history_stats
+        stats = get_stock_history_stats(code)
+        if not stats:
+            return {"status": "ok", "message": "该股票暂无验证数据", "code": code, "data": None}
+        return {"status": "ok", "code": code, "data": stats}
+    except Exception as e:
+        logger.error(f"[backtest/stock/{code}] 失败: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":

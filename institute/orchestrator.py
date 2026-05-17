@@ -313,7 +313,13 @@ class ResearchInstitute:
             from core.data_layer import DataLayer
             capital = DataLayer().get_stock_capital(code)
 
-        # 4. 计算指标
+        # 4. 计算 5 日涨幅
+        change_5d = 0
+        if len(records) >= 6:
+            price_5d_ago = records[-6]["close"]
+            change_5d = (price - price_5d_ago) / price_5d_ago * 100
+
+        # 5. 计算指标
         indicators_list = calculate_all_indicators(records, capital, capital_unit="shares")
         if not indicators_list:
             raise ValueError("指标计算失败")
@@ -334,7 +340,7 @@ class ResearchInstitute:
         cost_pct = latest.get('cost_deviation_percentile', latest.get('costDeviationPercentile', 0))
         lines = [
             f"【peistock 技术指标 · {name} {code}】",
-            f"价格: {price:.2f}  涨跌: {change_pct:.2f}%  日期: {date_str}",
+            f"价格: {price:.2f}  涨跌: {change_pct:.2f}%  5日涨幅: {change_5d:+.2f}%  日期: {date_str}",
             "",
             "| 指标 | 值 | 分位 |",
             "|------|-----|------|",
@@ -412,8 +418,15 @@ class ResearchInstitute:
 
     # ---------- 单角色执行 ----------
 
-    def run_analyst(self, slug: str, date_str: str = None, context: dict = None) -> Optional[Path]:
-        """执行单个分析师，返回报告文件路径"""
+    def run_analyst(self, slug: str, date_str: str = None, context: dict = None, llm=None) -> Optional[Path]:
+        """执行单个分析师，返回报告文件路径。
+
+        Args:
+            slug: 角色标识
+            date_str: 日期字符串
+            context: 上下文数据（股票代码、研报数据等）
+            llm: 可选，自定义 LLM 实例（用于线程安全地覆盖 reasoning_effort 等配置）
+        """
         # signal_monitor 是规则引擎，不走 AgentLoop
         if slug == "signal_monitor":
             return self._run_signal_monitor(date_str)
@@ -486,18 +499,80 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
-            # 季度财报核心数据注入（所有角色都需要，禁止基于趋势推演猜测财报）
-            try:
-                from core.financial_data import get_quarterly_financial_for_prompt
-                market = "a" if len(code) == 6 and code.isdigit() else "hk"
-                fin_data = get_quarterly_financial_for_prompt(code, market=market)
-                if fin_data and "⚠️" not in fin_data:
-                    logger.info(f"[{slug}] 预注入季度财报数据: {code}")
-                    messages.append(AgentMessage.user(fin_data))
+            # 季度财报核心数据注入（优先从 context 读取 api_server 预取数据，避免重复调用 akshare）
+            fin_data = context.get("financial_data") if context else None
+            if not fin_data:
+                try:
+                    from core.financial_data import get_quarterly_financial_for_prompt
+                    market = context.get("market") if context else ("a" if len(code) == 6 and code.isdigit() else "hk")
+                    fin_data = get_quarterly_financial_for_prompt(code, market=market)
+                except Exception as e:
+                    logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+            if fin_data and "⚠️" not in fin_data:
+                logger.info(f"[{slug}] 预注入季度财报数据: {code} ({'context' if context and context.get('financial_data') else 'fallback'})")
+                messages.append(AgentMessage.user(fin_data))
+            else:
+                logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
+
+            # 预期基准数据注入（Preemption/Chair 需要，用于量化预期差；优先从 context 读取）
+            if slug in ("preemption", "chair_debate"):
+                exp_data = context.get("expectation_data") if context else None
+                if not exp_data:
+                    try:
+                        from core.financial_data import get_expectation_for_stock
+                        market = context.get("market") if context else ("a" if len(code) == 6 and code.isdigit() else "hk")
+                        exp_data = get_expectation_for_stock(code, market=market)
+                    except Exception as e:
+                        logger.warning(f"[{slug}] 预期基准数据获取失败: {e}")
+                if exp_data and "⚠️" not in exp_data:
+                    logger.info(f"[{slug}] 预注入预期基准数据: {code} ({'context' if context and context.get('expectation_data') else 'fallback'})")
+                    messages.append(AgentMessage.user(exp_data))
                 else:
-                    logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
-            except Exception as e:
-                logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+                    logger.warning(f"[{slug}] 预期基准数据不可用: {code}")
+
+            # Preemption 角色：公式化计算入场时机评分并注入
+            if slug == "preemption":
+                try:
+                    from core.preemption_scorer import build_preemption_score_from_prompt_data
+                    # 提取 5 日涨幅（优先从预注入的 peistock 数据）
+                    price_change_5d = 0
+                    peistock_text = peistock_data or ""
+                    pm = re.search(r'5日涨幅:\s*([+-]?\d+\.?\d*)%', peistock_text)
+                    if pm:
+                        price_change_5d = float(pm.group(1))
+                    else:
+                        # fallback：尝试提取当日涨跌作为近似
+                        pm = re.search(r'涨跌:\s*([+-]?\d+\.?\d*)%', peistock_text)
+                        if pm:
+                            price_change_5d = float(pm.group(1))
+                    if context and context.get("price_change_5d"):
+                        price_change_5d = float(context.get("price_change_5d"))
+
+                    score_result = build_preemption_score_from_prompt_data(
+                        financial_md=fin_data or "",
+                        expectation_md=exp_data or "",
+                        price_change_5d=price_change_5d,
+                    )
+                    if score_result:
+                        score_md = (
+                            f"【系统公式化 Preemption 评分 · {code}】\n\n"
+                            f"系统已基于量化公式自动计算入场时机评分，此评分独立于你的主观判断，"
+                            f"你的任务是解释这个评分并验证其合理性：\n\n"
+                            f"- **入场时机评分**: {score_result['score']}/100\n"
+                            f"  - 基本面偏离分: {score_result['fundamental']}/100\n"
+                            f"  - 价格消化度: {score_result['priced_in']}/100（越高表示股价已反应越多）\n"
+                            f"  - 营收偏离: {score_result['rev_diff']:+.2f}%\n"
+                            f"  - 净利润偏离: {score_result['profit_diff']:+.2f}%\n"
+                            f"- **计算过程**: {score_result['details']}\n\n"
+                            f"评分含义：100=信息完全未被消化（最佳入场点）；0=已被完全消化（入场即接盘）。\n"
+                            f"你的输出中「预判结论」部分的「入场时机评分」**必须使用此系统评分 {score_result['score']} 分**，"
+                            f"不要自行打分。你的价值在于：基于 Bull/Bear 观点和股价证据，解释这个评分是否合理、"
+                            f"是否存在公式未捕捉到的额外信息（如突发政策、行业催化、技术面突破等）。"
+                        )
+                        messages.append(AgentMessage.user(score_md))
+                        logger.info(f"[preemption] 注入公式化评分: {score_result['score']} 分")
+                except Exception as e:
+                    logger.warning(f"[preemption] 公式评分计算失败: {e}")
 
             # 研报客观数据注入（Bull/Bear/Preemption/Chair 需要，已预取于 context）
             if slug in ("bull", "bear", "preemption", "chair_debate"):
@@ -505,6 +580,17 @@ class ResearchInstitute:
                 if rr_data:
                     logger.info(f"[{slug}] 预注入研报客观数据: {code} ({len(rr_data)} 字符)")
                     messages.append(AgentMessage.user(rr_data))
+
+            # Chair 裁决前注入该股票历史验证表现（回测闭环反馈）
+            if slug == "chair_debate":
+                try:
+                    from core.backtest_tracker import format_stock_stats_for_prompt
+                    history_md = format_stock_stats_for_prompt(code)
+                    if history_md:
+                        logger.info(f"[chair] 注入历史验证表现: {code}")
+                        messages.append(AgentMessage.user(history_md))
+                except Exception as e:
+                    logger.warning(f"[chair] 历史验证表现注入失败: {e}")
 
         # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:
@@ -530,7 +616,7 @@ class ResearchInstitute:
         # TODO: 向量库修复后恢复
         pass
 
-        llm_for_role = self._get_llm_for_role(role)
+        llm_for_role = llm or self._get_llm_for_role(role)
         loop = ResearchAgentLoop(
             llm=llm_for_role,
             toolkit=toolkit,
@@ -584,7 +670,7 @@ class ResearchInstitute:
 
             # Fact-Check：事实核查
             try:
-                llm_for_check = self._get_llm_for_role(role)
+                llm_for_check = llm or self._get_llm_for_role(role)
                 fc_result = fact_check_report(report_content, llm_for_check, max_claims=6)
                 if fc_result.get("verified"):
                     fc_md = format_fact_check(fc_result)
@@ -747,7 +833,7 @@ class ResearchInstitute:
             "5. 不要输出任何 thinking、reasoning 或 thought 标签，直接输出最终报告",
             "6. 直接在最终回复中输出完整报告全文，不要调用 write_file 工具写入文件",
             "7. 禁止写代码、禁止创建文件、禁止执行脚本——所有分析必须在同一条回复中用自然语言完成",
-            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
+            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。严禁在报告中提及"搜索不可用""搜索失败""无法获取最新消息"等任何关于工具失败的描述——读者不需要知道工具是否工作，只需要看到完整的分析结论。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
         ])
         if role.tools:
             lines.append(f"9. 你可以使用的工具: {', '.join(role.tools)}")

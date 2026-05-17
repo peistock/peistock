@@ -8,7 +8,7 @@
 
 **两条主线**:
 1. **市场级**(`main.py`):mag7 离散度 / VIX / PMI / 融资集中度 / A 股 / HK 龙头离散度 / 涨跌停极端 触发宏观辩论(+ 财联社快讯注入 prompt)
-2. **个股级**(`main_stock.py` / `api_server.py`):A 股 6 位 / HK 5 位代码,拉日 K 算 peistock 指标 + 严格 B/S 信号 + 近期新闻/公告 → Bull/Bear 并行分析 → Preemption(信息消化评估) → Chair(三维度裁决) → 个股决策卡
+2. **个股级**(`main_stock.py` / `api_server.py`):A 股 6 位 / HK 5 位代码,拉日 K 算 peistock 指标 + 严格 B/S 信号 + 近期新闻/公告 + 季度财报 → Bull/Bear 并行分析 → Preemption/Sentiment 并行分析 → Chair(五维度裁决) → 个股决策卡
 
 ## 运行方式
 
@@ -82,12 +82,14 @@ PYTHONPATH=/opt/family-mind:/opt/rebel_research nohup .venv/bin/uvicorn api_serv
 - **个股数据走腾讯 API 直连，不走本地 peistock API**:`institute/orchestrator.py` 的 `_fetch_peistock_data` 优先 HTTP 连本地 peistock API（开发环境），失败后回退到 `_fetch_tencent_indicators` 直连腾讯财经 API（`web.ifzq.gtimg.cn`）获取 K 线 + 实时行情，本地 Python 指标引擎计算。生产环境 JD Cloud 无本地 peistock API，全部走腾讯 API。此设计避免了 akshare /mock 数据导致 AI 报告指标值失真（曾出现 MAHS/EMAHS 30% 偏差、CRI 相差 18 倍的数据质量事故）
 - **`query_peistock` 工具已移除**:原 `query_peistock` 工具让 LLM 自行调用本地 API，但生产环境 Connection Refused 导致分析失败。现已从所有 `roles/*.yaml` 的 tools 列表移除，并从 toolkit 注册表 `pop` 掉。技术指标由 orchestrator 预注入 prompt，LLM 无需再调工具
 - **searxng_proxy.py 替代 Docker SearXNG**:JD Cloud 服务器无法拉取 Docker 镜像，用 Python HTTP 代理（8080 端口）直接抓取百度/必应/搜狗，返回 SearXNG 兼容格式
+- **季度财报数据预注入**:新增 `core/financial_data.py`，通过 akshare `stock_yjbb_em` 拉取最新季度财报（营收、净利润、同比/环比增速、毛利率、ROE），以 Markdown 格式注入 Bull/Bear/Preemption/Chair 的 prompt。LLM 严禁基于趋势推演猜测财报数据，必须使用已披露的实际数字
 - **个股决策卡先不入 memory.db**:`generate_stock_card` 只写文件,不持久化到衰减记忆。原因:个股卡和市场卡的 `claim_type` 体系还没统一,先存盘观察
+- **api_server 决策卡解析**:Chair 报告生成后，`_generate_stock_decision_card` 从 Markdown 内容正则提取 decision/conviction/thesis/kill_switch 等字段，写入 `data/stock_decisions/<code>_<date>.json`，供 `recent_decisions` 和前端历史报告接口使用
 - **市场 anomaly 走 `AnomalySignal` dataclass**:新增触发器在 `core/anomaly_trigger.py` 加分支,严重程度走 `severity = "high"|"medium"`,cooldown 走 `last_trigger_by_type` 字典
-- **个股级走四步链，Bull/Bear 并行**:Bull 和 Bear 无相互依赖，通过 `ThreadPoolExecutor(max_workers=2)` 并行执行；Preemption 依赖 Bull+Bear 报告，串行；Chair 依赖三者，串行。总耗时从 ~6min 降至 ~3-4min
+- **个股级走四步链，Bull/Bear 并行 + Preemption/Sentiment 并行**:Bull 和 Bear 无相互依赖，通过 `_inner_pool` 并行执行；Preemption 和 Sentiment 均依赖 Bull+Bear 报告，并行执行；Chair 依赖四者，串行。总耗时 ~3-4min。`_LLMProxy` 为每个任务临时覆盖 `reasoning_effort`，避免 `_bg_pool` 多线程共享 LLM 单例导致配置互相覆盖
 - **报告缓存按 date+code 分文件名**:orchestrator.py 在 `run_analyst` 中读取 `context["code"]`，生成 `{date_str}_{code}_{slug}.md`，避免同日多票串缓存
 - **个股角色纯 YAML 配置，不硬编码**:新增分析师只需在 `roles/` 下放 YAML，ResearchInstitute 自动加载。依赖关系走 `dependencies` 字段，orchestrator 自动按拓扑排序注入上游报告
-- **api_server 必须加载 `~/family-mind/.env`**:`api_server.py` 启动时显式 `load_dotenv(os.path.join(FM_ROOT, ".env"))`，否则 LLMClient 默认连 LM Studio (localhost:1234) 导致分析失败
+- **api_server 只加载 `~/family-mind/.env`**:`api_server.py` 启动时只加载 `FM_ROOT/.env`（项目自身不维护 `.env`），否则 LLMClient 默认连 LM Studio (localhost:1234) 导致分析失败。`_get_institute()` 用双检锁防止 FastAPI 多线程并发重复初始化
 - **个股 Bull/Bear/Preemption/Chair 复用 `roles/*.yaml` 的 persona**:`config/rebel.yaml` 里那对通用 prompt 对市场级够用；个股级角色单独在 `roles/` 下维护 YAML，不混用
 - **指标计算**:`calculate_all_indicators` 接受 DataFrame 或 List[Dict] 都行,内部统一转 List[Dict] 处理,返回 List[Dict],每行一天
 - **新闻注入辩论**:`core/news_fetcher.py` 提供 `fetch_stock_news` / `fetch_stock_notices` / `fetch_macro_news`,失败走 mock。`analyze_stock` / `analyze_bull` / `analyze_bear` 接 `news=` 参数透传到 prompt;`generate_*_card` 接 `news=` 把原文落盘到卡的 `news_context` 字段。**news 是可选参数**(None 时降级为纯指标 prompt),老调用点不传不会断

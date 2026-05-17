@@ -6,7 +6,7 @@
 
 | 原版 ResearchOS | RebelResearchOS | 实现 |
 |---|---|---|
-| 42 个分析师覆盖全角度 | **3 个分析师 + 1 个裁决员:Bull / Bear / Preemption → Chair** | `roles/` + `institute/orchestrator.py` |
+| 42 个分析师覆盖全角度 | **4 个分析师 + 1 个裁决员:Bull / Bear / Preemption / Sentiment → Chair** | `roles/` + `institute/orchestrator.py` |
 | 无限归档向量沉淀 | **观点有半衰期,自动遗忘 + 墓碑机制** | `core/decaying_memory.py` |
 | 每 30-60min 强制产出 | **异常信号触发,其余时间静默** | `core/anomaly_trigger.py` |
 | 模型 A 验证模型 B | **对接真实数据源验证** | `core/fact_anchor.py` |
@@ -111,6 +111,7 @@ rebel_research/
 │   ├── fact_anchor.py       数据锚定验证
 │   ├── news_fetcher.py      增量市场信息（akshare 个股新闻 / 公告 / 财联社快讯）
 │   ├── research_report.py   东方财富研报抓取与摘要
+│   ├── financial_data.py    季度财报数据获取（akshare 业绩报表）
 │   └── backtest.py          历史回测引擎
 ├── institute/
 │   ├── orchestrator.py      ResearchInstitute：YAML 角色加载 + 依赖注入 + 研报缓存
@@ -176,9 +177,9 @@ rebel_research/
 1. `data_layer.get_stock_history(code)` 拉 300 天日 K（A 用 `stock_zh_a_hist`，HK 用 `stock_hk_hist`，前复权）
 2. `indicators.calculate_all_indicators(hist, capital)` 输出 44 个指标字段，包括 BIAS 系列、CRI / GSI / MAHS-EMAHS、ADX、PVT 背离、Yang-Zhang 年化波动
 3. `signal_detector.detect_signals(...)` 检测严格 B/S：B(底背离) / B(恐慌) / S(顶背离) / S(贪婪)
-4. **Bull + Bear 并行分析**（`ThreadPoolExecutor`）：各拿一遍指标摘要 + 信号 + 新闻去生成独立报告
-5. **Preemption（信息消化评估）**：读取 Bull/Bear 报告，结合股价走势判断利好/利空是否已 Price-in，输出入场时机评分
-6. **Chair（三维度裁决）**：综合 Bull/Bear/Preemption 报告出最终决策卡（LONG/SHORT/NEUTRAL + 止损位 + 持有期），写到 `data/stock_decisions/` 和 `data/archives/`
+4. **Bull + Bear 并行分析**（`_inner_pool`）：各拿一遍指标摘要 + 信号 + 新闻 + 季度财报去生成独立报告
+5. **Preemption（信息消化评估）+ Sentiment（情绪行为分析）并行**：Preemption 读取 Bull/Bear 报告判断利好/利空是否已 Price-in；Sentiment 基于融资融券/换手/资金流向度量市场情绪
+6. **Chair（五维度裁决）**：综合 Bull/Bear/Preemption/Sentiment 报告 + 原始财报数据出最终决策卡（LONG/SHORT/NEUTRAL + 止损位 + 持有期），写到 `data/stock_decisions/` 和 `data/archives/`
 
 **指标引擎以 peistock 为准**：`core/indicators.py` 和 `core/signal_detector.py` 是 peistock TS 实现的 1:1 Python 移植。改公式时先去 peistock 改并验证，再同步本侧。
 
@@ -189,10 +190,13 @@ rebel_research/
 - **Bull**：必须找到"这次不一样"的论据，必须反驳当前看空叙事
 - **Bear**：必须指出逻辑漏洞，必须量化最大损失
 - **Preemption（预判你的预判）**：评估 Bull/Bear 提到的利好/利空是否已被股价提前消化。输出 0-100 入场时机评分（100=完全未消化，0=已被完全消化）。评分 <40 时提示"追涨/杀跌陷阱"
-- **Chair（投委会裁决员）**：综合 Bull/Bear 置信度 + Preemption 时机评分做最终裁决
-  - Preemption < 40 → 强制 NEUTRAL（信息已被消化，不做方向性押注）
-  - Bull >70 且 Bear <30 且 Preemption >40 → LONG
-  - Bear >70 且 Bull <30 且 Preemption >40 → SHORT
+- **Sentiment（情绪行为分析师）**：基于融资融券/北向资金/龙虎榜/换手率度量市场情绪。识别"极度贪婪+机构流出"等逆向信号
+- **Chair（投委会裁决员）**：综合 Bull/Bear 置信度 + Preemption 时机评分 + Sentiment 情绪过滤做最终裁决
+  - Preemption < 30 → 强制 NEUTRAL（信息已被消化）
+  - Sentiment 极度贪婪 + 机构流出 → 禁止 LONG，条件允许则 SHORT
+  - Sentiment 极度恐慌 + 机构流入 → 禁止 SHORT，条件允许则 LONG
+  - Bull >70 且 Bear <30 且 Preemption >40 且未触发情绪否决 → LONG
+  - Bear >70 且 Bull <30 且 Preemption >40 且未触发情绪否决 → SHORT
   - 其他 → NEUTRAL
 
 ### 增量市场信息（news_fetcher）

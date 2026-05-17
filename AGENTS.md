@@ -25,10 +25,11 @@
 - **趋势强度**: 5级分类 (strong_bull/bull/neutral/bear/strong_bear)
 
 #### 2. 股票池 (src/data/watchlist.ts + src/components/StockPool.tsx)
-- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化，后续支持增删改
+- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化并写入 localStorage，后续支持增删改/star/分类切换
 - **分类管理**: 分类列表也持久化（key: `rros_stock_pool_categories`），支持自定义添加/删除空分类
-- **StockPool 组件**: 支持按分类 tab 筛选、添加股票（名称/拼音自动解析代码）、删除、star 标记、inline 分类切换
-- **搜索集成**: 搜索框支持中文名称/拼音搜索，自动解析为股票代码
+- **StockPool 组件**: 支持按分类 tab 筛选、添加股票（名称/拼音自动解析代码）、删除（hover 显示×）、star 标记（☆/★）、inline 分类切换下拉
+- **搜索集成**: 搜索框支持中文名称/拼音搜索，自动解析为股票代码。搜索框右侧按钮为"加入股票池"（替代旧收藏系统）
+- **旧收藏迁移**: 首次加载时自动将 `localStorage` 中的 `peter_stock_favorites` 迁移到股票池并标记 star
 
 #### 3. 信号系统
 
