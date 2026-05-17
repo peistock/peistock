@@ -542,7 +542,7 @@ class ResearchInstitute:
         )
 
         try:
-            result = loop.run(messages, max_iterations=8)
+            result = loop.run(messages, max_iterations=12)
             reply = result.get("reply", "")
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
