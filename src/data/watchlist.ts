@@ -14,7 +14,6 @@ export interface StockItem {
 
 const STORAGE_KEY = 'rros_stock_pool';
 const LEGACY_FAV_KEY = 'peter_stock_favorites';
-const CATEGORIES_KEY = 'rros_stock_categories';
 
 const DEFAULT_CATEGORIES = [
   '能源化工', '半导体电子', '消费食饮', '医药生物', '金融保险',

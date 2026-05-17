@@ -477,7 +477,8 @@ class ResearchInstitute:
                 messages.append(AgentMessage.user(peistock_data))
 
             # Sentiment 角色额外注入融资融券/北向资金/龙虎榜结构化数据
-            if slug == "sentiment":
+            # Chair 也需要直接读取原始情绪数据，避免三手信息失真
+            if slug in ("sentiment", "chair_debate"):
                 sentiment_data = self._fetch_sentiment_data(code)
                 if sentiment_data:
                     logger.info(f"[{slug}] 预注入情绪行为数据: {code}")
@@ -485,15 +486,14 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
-            # 研报客观数据注入（Bull/Bear/Preemption 需要，已预取于 context）
-            if slug in ("bull", "bear", "preemption"):
+            # 研报客观数据注入（Bull/Bear/Preemption/Chair 需要，已预取于 context）
+            if slug in ("bull", "bear", "preemption", "chair_debate"):
                 rr_data = context.get("research_report_data") if context else None
                 if rr_data:
                     logger.info(f"[{slug}] 预注入研报客观数据: {code} ({len(rr_data)} 字符)")
                     messages.append(AgentMessage.user(rr_data))
 
-        # 依赖角色：注入已完成的分析师报告
-        # Chair 读摘要即可（加速），Preemption/Sentiment 需读完整报告（做准确判断）
+        # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:
             dep_reports = []
             for dep_slug in role.dependencies:
@@ -502,31 +502,16 @@ class ResearchInstitute:
                     dep_role = self.roles.get(dep_slug)
                     dep_name = dep_role.name if dep_role else dep_slug
                     dep_content = dep_path.read_text(encoding="utf-8")
-                    # Chair 截断到1500字符，其他角色保留完整报告
-                    if slug == "chair_debate":
-                        dep_content = dep_content[:1500]
-                        if len(dep_path.read_text(encoding="utf-8")) >= 1500:
-                            dep_content = dep_content.rsplit('\n', 1)[0] + "\n\n...（报告已截断，以上为摘要）"
-                        dep_reports.append(f"---\n## {dep_name}报告摘要\n\n{dep_content}")
-                    else:
-                        dep_reports.append(f"---\n## {dep_name}报告\n\n{dep_content}")
+                    dep_reports.append(f"---\n## {dep_name}报告\n\n{dep_content}")
                 else:
                     logger.warning(f"[{slug}] 依赖报告不存在: {dep_path}")
             if dep_reports:
-                if slug == "chair_debate":
-                    logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告摘要")
-                    messages.append(AgentMessage.user(
-                        "以下是你需要阅读的各分析师报告摘要，请据此合成最终简报。\n"
-                        "报告内容已截断为摘要，请直接阅读并合成，不需要调用任何工具。\n\n"
-                        + "\n\n".join(dep_reports)
-                    ))
-                else:
-                    logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告")
-                    messages.append(AgentMessage.user(
-                        "以下是你需要阅读的各分析师报告（原始内容），请据此合成最终简报。\n"
-                        "报告内容已完整提供在下方，请直接阅读并合成，不需要调用任何工具。\n\n"
-                        + "\n\n".join(dep_reports)
-                    ))
+                logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告")
+                messages.append(AgentMessage.user(
+                    "以下是你需要阅读的各分析师报告（原始内容），请据此合成最终简报。\n"
+                    "报告内容已完整提供在下方，请直接阅读并合成，不需要调用任何工具。\n\n"
+                    + "\n\n".join(dep_reports)
+                ))
 
         # 向量检索和衰减记忆已禁用（减少LLM输入长度和外部依赖，加速分析）
         # TODO: 向量库修复后恢复

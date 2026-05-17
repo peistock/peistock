@@ -28,10 +28,10 @@ if FM_ROOT not in sys.path:
     sys.path.insert(0, FM_ROOT)
 
 from dotenv import load_dotenv
-# 先加载 rebel_research 自己的 .env（DeepSeek 配置优先）
-load_dotenv(os.path.join(ROOT, ".env"))
+# 先加载 rebel_research 自己的 .env（DeepSeek 配置优先，强制覆盖已有环境变量）
+load_dotenv(os.path.join(ROOT, ".env"), override=True)
 # 再加载 family-mind 的 .env（本地未设置的变量兜底）
-load_dotenv(os.path.join(FM_ROOT, ".env"))
+load_dotenv(os.path.join(FM_ROOT, ".env"), override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
