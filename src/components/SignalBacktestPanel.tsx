@@ -23,11 +23,12 @@ function formatPct(v: number): string {
 }
 
 function formatRatio(v: number): string {
+  if (typeof v !== 'number' || isNaN(v)) return '—';
   return v.toFixed(2);
 }
 
 function RatioCell({ value }: { value: number }) {
-  const isGood = value >= 1;
+  const isGood = typeof value === 'number' && value >= 1;
   return (
     <span className={`font-mono font-medium ${isGood ? 'text-[#03B172]' : 'text-[#FF3435]'}`}>
       {formatRatio(value)}
