@@ -477,7 +477,8 @@ class ResearchInstitute:
                 messages.append(AgentMessage.user(peistock_data))
 
             # Sentiment 角色额外注入融资融券/北向资金/龙虎榜结构化数据
-            if slug == "sentiment":
+            # Chair 也需要直接读取原始情绪数据，避免三手信息失真
+            if slug in ("sentiment", "chair_debate"):
                 sentiment_data = self._fetch_sentiment_data(code)
                 if sentiment_data:
                     logger.info(f"[{slug}] 预注入情绪行为数据: {code}")
@@ -485,15 +486,27 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
-            # 研报客观数据注入（Bull/Bear/Preemption 需要，已预取于 context）
-            if slug in ("bull", "bear", "preemption"):
+            # 季度财报核心数据注入（所有角色都需要，禁止基于趋势推演猜测财报）
+            try:
+                from core.financial_data import get_quarterly_financial_for_prompt
+                market = "a" if len(code) == 6 and code.isdigit() else "hk"
+                fin_data = get_quarterly_financial_for_prompt(code, market=market)
+                if fin_data and "⚠️" not in fin_data:
+                    logger.info(f"[{slug}] 预注入季度财报数据: {code}")
+                    messages.append(AgentMessage.user(fin_data))
+                else:
+                    logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
+            except Exception as e:
+                logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+
+            # 研报客观数据注入（Bull/Bear/Preemption/Chair 需要，已预取于 context）
+            if slug in ("bull", "bear", "preemption", "chair_debate"):
                 rr_data = context.get("research_report_data") if context else None
                 if rr_data:
                     logger.info(f"[{slug}] 预注入研报客观数据: {code} ({len(rr_data)} 字符)")
                     messages.append(AgentMessage.user(rr_data))
 
-        # 依赖角色：注入已完成的分析师报告
-        # Chair 读摘要即可（加速），Preemption/Sentiment 需读完整报告（做准确判断）
+        # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:
             dep_reports = []
             for dep_slug in role.dependencies:
@@ -502,31 +515,16 @@ class ResearchInstitute:
                     dep_role = self.roles.get(dep_slug)
                     dep_name = dep_role.name if dep_role else dep_slug
                     dep_content = dep_path.read_text(encoding="utf-8")
-                    # Chair 截断到1500字符，其他角色保留完整报告
-                    if slug == "chair_debate":
-                        dep_content = dep_content[:1500]
-                        if len(dep_path.read_text(encoding="utf-8")) >= 1500:
-                            dep_content = dep_content.rsplit('\n', 1)[0] + "\n\n...（报告已截断，以上为摘要）"
-                        dep_reports.append(f"---\n## {dep_name}报告摘要\n\n{dep_content}")
-                    else:
-                        dep_reports.append(f"---\n## {dep_name}报告\n\n{dep_content}")
+                    dep_reports.append(f"---\n## {dep_name}报告\n\n{dep_content}")
                 else:
                     logger.warning(f"[{slug}] 依赖报告不存在: {dep_path}")
             if dep_reports:
-                if slug == "chair_debate":
-                    logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告摘要")
-                    messages.append(AgentMessage.user(
-                        "以下是你需要阅读的各分析师报告摘要，请据此合成最终简报。\n"
-                        "报告内容已截断为摘要，请直接阅读并合成，不需要调用任何工具。\n\n"
-                        + "\n\n".join(dep_reports)
-                    ))
-                else:
-                    logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告")
-                    messages.append(AgentMessage.user(
-                        "以下是你需要阅读的各分析师报告（原始内容），请据此合成最终简报。\n"
-                        "报告内容已完整提供在下方，请直接阅读并合成，不需要调用任何工具。\n\n"
-                        + "\n\n".join(dep_reports)
-                    ))
+                logger.info(f"[{slug}] 注入 {len(dep_reports)} 份依赖报告")
+                messages.append(AgentMessage.user(
+                    "以下是你需要阅读的各分析师报告（原始内容），请据此合成最终简报。\n"
+                    "报告内容已完整提供在下方，请直接阅读并合成，不需要调用任何工具。\n\n"
+                    + "\n\n".join(dep_reports)
+                ))
 
         # 向量检索和衰减记忆已禁用（减少LLM输入长度和外部依赖，加速分析）
         # TODO: 向量库修复后恢复
@@ -542,7 +540,7 @@ class ResearchInstitute:
         )
 
         try:
-            result = loop.run(messages, max_iterations=8)
+            result = loop.run(messages, max_iterations=12)
             reply = result.get("reply", "")
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
@@ -569,11 +567,20 @@ class ResearchInstitute:
                         reply = largest.read_text(encoding="utf-8")
 
             report_content = self._format_report(role, today, reply)
-            report_path.write_text(report_content, encoding="utf-8")
 
-            # 向量库和衰减记忆已禁用（加速分析）
-            # TODO: 修复后恢复
-            pass
+            # 空内容保护：LLM 返回异常时不跑无意义的 Fact-Check
+            if len(report_content.strip()) < 200:
+                logger.error(f"[{slug}] 报告内容过短 ({len(report_content)} 字符)，判定为生成失败")
+                report_path.write_text(
+                    f"# {role.name} - {today}\n\n"
+                    f"⚠️ 报告生成失败：LLM 返回内容为空或极短。\n"
+                    f"（原始回复长度：{len(reply)} 字符，清洗后：{len(report_content)} 字符）\n"
+                    f"请稍后重试，或检查模型服务状态。\n",
+                    encoding="utf-8"
+                )
+                return report_path
+
+            report_path.write_text(report_content, encoding="utf-8")
 
             # Fact-Check：事实核查
             try:
@@ -700,17 +707,37 @@ class ResearchInstitute:
             "",
         ]
 
-        # 个股分析时追加财报时间线锚定
+        # 个股分析时追加财报时间线锚定（基于当前日期动态推断）
         if context and context.get("code"):
+            now = datetime.now()
+            year = now.year
+            month = now.month
+            # A股：Q1(4月底) / 半年报(8月底) / Q3(10月底) / 年报(次年4月底)
+            # 动态推断最新已披露财报
+            if month >= 5:
+                latest_a = f"{year}年Q1季报"
+                latest_a_deadline = f"{year}年4月30日"
+            elif month >= 9:
+                latest_a = f"{year}年半年报"
+                latest_a_deadline = f"{year}年8月31日"
+            elif month >= 11:
+                latest_a = f"{year}年Q3季报"
+                latest_a_deadline = f"{year}年10月31日"
+            else:
+                latest_a = f"{year - 1}年年报"
+                latest_a_deadline = f"{year}年4月30日"
+
             lines.append("财报时间线锚定（必须遵守）：")
-            lines.append("- A股2026年Q1季报已于2026年4月30日前全部披露完毕，分析中不得将其视为'即将披露'的未来催化剂")
-            lines.append("- 港股主要公司2026年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布")
-            lines.append("- 美股Mag7的2026年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕")
+            lines.append(f"- A股{latest_a}已于{latest_a_deadline}前全部披露完毕，分析中不得将其视为'即将披露'的未来催化剂")
+            lines.append(f"- 港股主要公司{year}年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布")
+            lines.append(f"- 美股Mag7的{year}年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕")
             lines.append("- 严禁基于已披露财报进行'可能''或将''预计'等猜测性表述；已披露的数据就是事实，未披露的数据才能使用预期")
             lines.append("")
 
+        # 替换 persona 中的动态占位符
+        persona_text = role.persona.replace("{current_date}", today)
         lines.extend([
-            role.persona,
+            persona_text,
             "",
             "执行规则：",
             "1. 你需要主动使用工具收集实时信息，不要依赖已有知识",
@@ -789,8 +816,10 @@ class ResearchInstitute:
         return header + content
 
     def _clean_reasoning_tokens(self, text: str) -> str:
-        """清洗模型内部 reasoning token"""
+        """清洗模型内部 reasoning token（支持 DeepSeek <think>、Qwen <|channel|> 等格式）"""
         import re
+        # DeepSeek-R1 等模型：<think>...</think>
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
         # 匹配 <|channel>thought ... <|channel|> 格式的 thinking 块
         text = re.sub(r"<\|channel\>thought.*?<\|channel\|>", "", text, flags=re.DOTALL)
         # 匹配单独的 thinking 标签

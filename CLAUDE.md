@@ -31,6 +31,11 @@ PYTHONPATH=/opt/family-mind:/opt/rebel_research nohup .venv/bin/uvicorn api_serv
 ```
 前端通过 Cloudflare Tunnel 代理到 `research.peistock.win`，绕过 JD Cloud 代理屏蔽。
 
+**前端部署**（peistock 仓库）：
+- 前端代码在 `peistock` 仓库（`github.com/peistock/peistock`），EdgeOne Pages 自动构建
+- rebel_research 的 `src/` 代码变更需同步到 peistock 仓库后 push，触发 EdgeOne 自动部署
+- 本地开发时 Vite 代理 `/api/research` → `http://localhost:8000`；生产环境直接请求 `research.peistock.win`
+
 注:`panel.py` 内部用 subprocess 起 `main.py` / `main_stock.py`,会自动把 `~/family-mind` 加到子进程的 PYTHONPATH。
 
 ## 外部依赖
@@ -51,6 +56,18 @@ PYTHONPATH=/opt/family-mind:/opt/rebel_research nohup .venv/bin/uvicorn api_serv
 | `main_backtest.py` | 历史回测 | ✗ | `data/backtest_report.json` | 0 |
 | `panel.py` | Gradio 面板(端口 7862) | 间接(subprocess) | 同上 | 0 |
 
+**新增 API 路由**:
+| 路由 | 说明 |
+|---|---|
+| `POST /api/analyze/stock/{code}` | 提交个股分析任务，返回 task_id |
+| `GET /api/tasks/{task_id}` | 轮询查询分析状态与结果 |
+| `GET /api/decisions/recent` | 最近决策列表 |
+| `GET /api/signals/latest` | 最新异常信号 |
+| `GET /api/memory/active` | 活跃观点（衰减后 >30%） |
+| `GET /api/roles` | 列出所有加载的角色 |
+| `GET /api/search/stock?q=` | 代理东方财富搜索（名称/拼音 → 代码） |
+| `GET /api/stock/{code}/report-history` | 查询个股历史 AI 分析报告摘要 |
+
 ## 不可触碰区
 
 - **不修改 `~/family-mind` 任何代码** —— 项目通过 import 使用,需要的定制全走子类化或本地 wrapper
@@ -61,6 +78,7 @@ PYTHONPATH=/opt/family-mind:/opt/rebel_research nohup .venv/bin/uvicorn api_serv
 ## 架构约束
 
 - **数据层带 mock fallback + mock 追踪拒绝**:`core/data_layer.py` 所有外部数据方法都有 `_mock_*` 兜底,同时记录到 `self._mock_sources` set。`main.py` / `main_stock.py` 在生成决策卡前调用 `_check_mock_block()`,若检测到 mock 数据则打印警报横幅并以 exit code 10 拒绝生成,防止假数据导致错误投资决策。新增数据源时保留 mock fallback 模式,并确保 mock 路径调用 `self._mock_sources.add("source_name")`
+- **股票池 localStorage 持久化（浏览器端）**：`src/data/watchlist.ts` 保留硬编码 `DEFAULT_WATCHLIST` 作为首次访问的初始数据，后续读写走 `localStorage`（key: `rros_stock_pool`）。支持 CRUD：添加（名称/拼音自动解析代码）、删除、star 标记、分类切换。分类列表也持久化（key: `rros_stock_pool_categories`）。旧收藏 `peter_stock_favorites` 自动迁移到股票池并标记 star。
 - **个股数据走腾讯 API 直连，不走本地 peistock API**:`institute/orchestrator.py` 的 `_fetch_peistock_data` 优先 HTTP 连本地 peistock API（开发环境），失败后回退到 `_fetch_tencent_indicators` 直连腾讯财经 API（`web.ifzq.gtimg.cn`）获取 K 线 + 实时行情，本地 Python 指标引擎计算。生产环境 JD Cloud 无本地 peistock API，全部走腾讯 API。此设计避免了 akshare /mock 数据导致 AI 报告指标值失真（曾出现 MAHS/EMAHS 30% 偏差、CRI 相差 18 倍的数据质量事故）
 - **`query_peistock` 工具已移除**:原 `query_peistock` 工具让 LLM 自行调用本地 API，但生产环境 Connection Refused 导致分析失败。现已从所有 `roles/*.yaml` 的 tools 列表移除，并从 toolkit 注册表 `pop` 掉。技术指标由 orchestrator 预注入 prompt，LLM 无需再调工具
 - **searxng_proxy.py 替代 Docker SearXNG**:JD Cloud 服务器无法拉取 Docker 镜像，用 Python HTTP 代理（8080 端口）直接抓取百度/必应/搜狗，返回 SearXNG 兼容格式

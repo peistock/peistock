@@ -12,6 +12,7 @@ echo "==> 同步代码到 ${HOST}:${REMOTE_DIR}"
 rsync -avz \
   --exclude='.git' \
   --exclude='.venv' \
+  --exclude='node_modules' \
   --exclude='__pycache__' \
   --exclude='data' \
   --exclude='storage/vector_index' \

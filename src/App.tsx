@@ -16,6 +16,8 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { submitAnalysisJob, getTaskStatus, getReportHistory, searchStock } from './utils/researchApi';
 import ReportHistory from './components/ReportHistory';
+import BacktestPanel from './components/BacktestPanel';
+import SignalBacktestPanel from './components/SignalBacktestPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
 import { getStockPool, addToStockPool, migrateLegacyFavorites } from './data/watchlist';
@@ -333,6 +335,7 @@ function App() {
   // 加载历史观点对比数据
   const loadHistory = useCallback(async () => {
     if (!stockInfo) return;
+    setHistoryData([]); // 先清空旧数据
     setHistoryLoading(true);
     try {
       const resp = await getReportHistory(stockInfo.symbol);
@@ -344,6 +347,14 @@ function App() {
       setHistoryLoading(false);
     }
   }, [stockInfo]);
+
+  // 切换股票时清空历史数据，避免显示旧股票的分析记录
+  useEffect(() => {
+    if (stockInfo) {
+      setHistoryData([]);
+      setShowHistory(false);
+    }
+  }, [stockInfo?.symbol]);
 
   // 后台轮询 — 独立于当前显示的股票
   useEffect(() => {
@@ -1590,6 +1601,23 @@ function App() {
               <span className="text-xs">同时显示日K线、周线、15分钟三个时间维度</span>
             </p>
           </div>
+        )}
+
+        {/* 信号级回测看板 */}
+        {stockInfo && (
+          <section className="mb-6">
+            <SignalBacktestPanel code={stockInfo.symbol} />
+          </section>
+        )}
+
+        {/* AI 决策验证（回测闭环） */}
+        {stockInfo && (
+          <section className="mb-6">
+            <BacktestPanel
+              code={stockInfo.symbol}
+              indicators={timeframeData.daily?.indicators}
+            />
+          </section>
         )}
       </main>
 

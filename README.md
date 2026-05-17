@@ -96,6 +96,7 @@ rebel_research/
 ├── api_server.py            FastAPI（端口 8000，供 peistock 前端调用）
 ├── main_backtest.py         回测入口
 ├── panel.py                 Gradio 面板（SSE 流式输出 / 决策卡 / 记忆 / 回测 / 快照 / 个股）
+├── deploy.sh                一键部署到 JD Cloud
 ├── config/
 │   └── rebel.yaml           配置：阈值、衰减率、分析师提示词
 ├── core/
@@ -109,6 +110,7 @@ rebel_research/
 │   ├── decaying_memory.py   观点半衰期 + 墓碑机制
 │   ├── fact_anchor.py       数据锚定验证
 │   ├── news_fetcher.py      增量市场信息（akshare 个股新闻 / 公告 / 财联社快讯）
+│   ├── research_report.py   东方财富研报抓取与摘要
 │   └── backtest.py          历史回测引擎
 ├── institute/
 │   ├── orchestrator.py      ResearchInstitute：YAML 角色加载 + 依赖注入 + 研报缓存
@@ -123,6 +125,20 @@ rebel_research/
 │   ├── macro.yaml           宏观分析师
 │   ├── signal_monitor.yaml  信号监控员
 │   └── ...
+├── src/                     React 前端（与 peistock 仓库共享）
+│   ├── App.tsx              主应用
+│   ├── components/
+│   │   ├── StockPool.tsx    股票池面板（localStorage 持久化）
+│   │   ├── StockSearch.tsx  搜索 + AI 分析展示
+│   │   ├── StockChart.tsx   K 线图
+│   │   ├── ReportHistory.tsx 历史 AI 报告对比表格
+│   │   └── ...
+│   ├── data/
+│   │   └── watchlist.ts     股票池数据层（localStorage CRUD）
+│   └── utils/
+│       ├── eastmoneyApi.ts  东方财富 API 封装
+│       ├── researchApi.ts   RROS 后端 API 封装
+│       └── indicators.ts    前端指标计算
 ├── data/                    运行时生成
 │   ├── memory.db            SQLite 记忆库
 │   ├── decision.json        最新市场级决策卡
@@ -221,6 +237,25 @@ Bull/Bear 辩论除了拿到指标数字，还会拿到**最近 24h 的新闻原
 - 按 entry_date 入场，按 holding_period 或 kill_switch 出场
 - 统计胜率、平均盈亏、kill_switch 触发率
 - 区分 long/short 分别统计
+
+### 前端功能（peistock 仓库）
+
+**股票池管理**：
+- localStorage 持久化，支持增删改
+- 按行业分类 tab 展示，支持自定义分类
+- 添加股票时输入名称/拼音自动解析代码
+- star 标记（替代旧收藏系统）
+- 旧收藏 `peter_stock_favorites` 自动迁移
+
+**搜索与分析**：
+- 搜索框支持中文名称 / 拼音缩写搜索（通过后端代理东方财富 suggest API）
+- AI 分析结果以卡片轮播展示，支持章节导航
+- 历史 AI 报告对比表格：日期为行，Bull/Bear/Preemption/Chair 为列
+
+**数据源**：
+- 东方财富 API（主）+ 腾讯财经 API（备）
+- 本地开发 Vite 代理 `/api/research` → `localhost:8000`
+- 生产环境直连 `research.peistock.win`
 
 ## 成本
 

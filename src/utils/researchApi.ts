@@ -6,7 +6,10 @@
 const API_BASE = import.meta.env.VITE_RESEARCH_API_BASE || '/api/research';
 
 async function fetchJSON(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    ...options,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -84,10 +87,10 @@ export interface ReportHistoryItem {
   price: number | null;
   change_pct: number | null;
   reports: {
-    bull: string;
-    bear: string;
-    preemption: string;
-    chair_debate: string;
+    bull: { summary: string; full: string };
+    bear: { summary: string; full: string };
+    preemption: { summary: string; full: string };
+    chair_debate: { summary: string; full: string };
   };
 }
 
@@ -99,5 +102,51 @@ export interface ReportHistoryResponse {
 
 /** 查询个股历史 AI 分析报告 */
 export async function getReportHistory(code: string): Promise<ReportHistoryResponse> {
-  return fetchJSON(`/stock/${code}/report-history`);
+  return fetchJSON(`/stock/${code}/report-history?_t=${Date.now()}`);
+}
+
+/** 全局回测统计 */
+export async function getBacktestSummary() {
+  return fetchJSON(`/backtest/summary`);
+}
+
+/** 单股票回测统计 */
+export async function getBacktestStock(code: string) {
+  return fetchJSON(`/backtest/stock/${code}`);
+}
+
+export interface SignalBacktestItem {
+  date: string;
+  price: number;
+  signal_type: 'B' | 'S';
+  signal_label: string;
+  max_gain: number;
+  max_drawdown: number;
+  total_return: number;
+}
+
+export interface SignalBacktestMatch {
+  date: string;
+  price: number;
+  cri_pct: number;
+  cost_dev_pct: number;
+  distance: number;
+  max_gain: number;
+  max_drawdown: number;
+  total_return: number;
+}
+
+export interface SignalBacktestResponse {
+  code: string;
+  current_price: number;
+  latest_date: string;
+  latest_cri_pct: number;
+  latest_cost_dev_pct: number;
+  signals: SignalBacktestItem[];
+  current_match: SignalBacktestMatch | null;
+}
+
+/** 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 */
+export async function getSignalBacktest(code: string): Promise<SignalBacktestResponse> {
+  return fetchJSON(`/backtest/signals/${code}?_t=${Date.now()}`);
 }

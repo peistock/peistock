@@ -2,18 +2,10 @@
 
 ## 核心规则
 
-### 部署规则（必须遵守）
-**"Test first, deploy after confirmation"**
-- 每次修改后必须先本地测试验证
-- 用户确认无误后才能部署
-- **严禁未经测试直接部署**
-
-### 代码修改流程
-1. 修改代码
-2. 本地构建测试 (`npm run build`)
-3. 向用户说明修改内容
-4. **等待用户确认**
-5. 用户说"部署"后再执行部署
+### 部署规则
+- **rebel_research**：用户说「push 到 git」时，自动执行 `./deploy.sh` 部署到 JD Cloud，无需二次确认
+- **peistock 前端**：代码同步到 `github.com/peistock/peistock` 后 push，EdgeOne Pages 自动构建部署
+- 大改动前先本地测试验证（`npm run build`、`tsc --noEmit`、Python 烟测）
 
 ## 项目架构
 
@@ -33,8 +25,10 @@
 - **趋势强度**: 5级分类 (strong_bull/bull/neutral/bear/strong_bear)
 
 #### 2. 股票池 (src/data/watchlist.ts + src/components/StockPool.tsx)
-- **默认股票池**: 154只关注股票，按行业分类（能源化工、半导体电子、消费食饮等）
-- **StockPool 组件**: 前端股票池面板，支持按分类标签筛选，点击股票直接跳转K线图
+- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化，后续支持增删改
+- **分类管理**: 分类列表也持久化（key: `rros_stock_pool_categories`），支持自定义添加/删除空分类
+- **StockPool 组件**: 支持按分类 tab 筛选、添加股票（名称/拼音自动解析代码）、删除、star 标记、inline 分类切换
+- **搜索集成**: 搜索框支持中文名称/拼音搜索，自动解析为股票代码
 
 #### 3. 信号系统
 
@@ -130,16 +124,20 @@ node test-scripts/test_percentile.mjs
 - 作为fallback使用
 - 数据格式与东方财富略有不同
 
-## HTTP API Server
+## HTTP API Server (api_server.py)
 
-启动：`npx tsx scripts/api-server.ts`（端口 3457，可通过 `PORT` 环境变量修改）
+启动：`PYTHONPATH=~/family-mind uvicorn api_server:app --port 8000`
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/stock/:code` | GET | 单股查询+指标计算+严格信号检测 |
-| `/api/signals/latest` | GET | 最新扫描结果（Excel） |
-| `/api/watchlist` | GET | 股票池列表（154只） |
-| `/api/scan` | POST | 批量扫描（限10只） |
+| `/api/analyze/stock/:code` | POST | 提交 AI 分析任务，返回 task_id |
+| `/api/tasks/:task_id` | GET | 轮询查询分析状态 |
+| `/api/decisions/recent` | GET | 最近决策列表 |
+| `/api/signals/latest` | GET | 最新异常信号 |
+| `/api/memory/active` | GET | 活跃观点（衰减后 >30%） |
+| `/api/roles` | GET | 列出所有加载的角色 |
+| `/api/search/stock?q=` | GET | 代理东方财富搜索（名称/拼音 → 代码） |
+| `/api/stock/:code/report-history` | GET | 查询个股历史 AI 分析报告摘要 |
 | `/health` | GET | 健康检查 |
 
 供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。
