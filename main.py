@@ -5,27 +5,16 @@ RebelResearchOS - Entry point
 Philosophy: subtraction creates multiplication
 """
 import os
-import sys
 import yaml
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# Wire family-mind so we can reuse its LLMClient
-FM_ROOT = os.path.expanduser("~/family-mind")
-if FM_ROOT not in sys.path:
-    sys.path.insert(0, FM_ROOT)
 
 
 def _init_llm():
-    """Load LLMClient (DeepSeek via rebel_research .env, fallback to family-mind)."""
+    """Load LLMClient from rebel_research .env."""
     try:
         from dotenv import load_dotenv
         rr_root = os.path.dirname(os.path.abspath(__file__))
-        # 先加载 rebel_research 自己的 .env（DeepSeek 配置优先）
         load_dotenv(os.path.join(rr_root, ".env"))
-        # 再加载 family-mind 的 .env（兜底）
-        load_dotenv(os.path.join(FM_ROOT, ".env"))
-        from mind.llm_client import LLMClient
+        from institute.mind.llm_client import LLMClient
         client = LLMClient()
         client._init()
         return client

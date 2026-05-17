@@ -27,7 +27,7 @@ pip install -r requirements.txt
 ### 2. 运行主系统
 
 ```bash
-PYTHONPATH=~/family-mind python main.py
+python main.py
 ```
 
 系统会：
@@ -43,8 +43,8 @@ PYTHONPATH=~/family-mind python main.py
 ### 3. 个股 Bull/Bear（A 股 / HK）
 
 ```bash
-PYTHONPATH=~/family-mind python main_stock.py 600989  # A 股 6 位代码
-PYTHONPATH=~/family-mind python main_stock.py 01810   # HK 5 位代码
+python main_stock.py 600989  # A 股 6 位代码
+python main_stock.py 01810   # HK 5 位代码
 ```
 
 流程：

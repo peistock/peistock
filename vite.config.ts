@@ -17,6 +17,14 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/research/, '/api'),
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            console.error('[vite:proxy] error:', err.message);
+          });
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log('[vite:proxy]', req.method, req.url, '->', proxyReq.path);
+          });
+        },
       },
     },
   },

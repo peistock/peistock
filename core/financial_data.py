@@ -285,6 +285,18 @@ def get_historical_growth_trend(code: str, quarters: int = 4) -> Optional[str]:
         return None
 
 
+def extract_announce_date(fin_md: str) -> Optional[str]:
+    """
+    从财报 Markdown 中提取最新财报公告日期。
+    返回 YYYY-MM-DD 格式字符串，未找到返回 None。
+    """
+    import re
+    m = re.search(r"财报公告日[：:]\s*(\d{4}-\d{2}-\d{2})", fin_md)
+    if m:
+        return m.group(1)
+    return None
+
+
 def get_expectation_for_stock(code: str, market: str = "a") -> str:
     """
     获取个股预期基准数据，用于 Preemption 量化预期差。

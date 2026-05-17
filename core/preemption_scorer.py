@@ -71,7 +71,7 @@ def calc_fundamental_score(actual_rev_yoy: float, actual_profit_yoy: float,
 
 def calc_priced_in_score(price_change_5d: float) -> float:
     """
-    价格提前反应度（0-100，越高表示股价已反应越多）。
+    短期价格提前反应度（0-100，越高表示股价已反应越多）。
     基于最近 5 日涨跌幅做经验映射：
     - >10% → 80 分（大部分已消化）
     - 5-10% → 50 分（部分消化）
@@ -87,12 +87,36 @@ def calc_priced_in_score(price_change_5d: float) -> float:
         return 10
 
 
+def calc_vacuum_period_score(price_change_vacuum: float) -> float:
+    """
+    跨财报真空期价格消化度（0-100，越高表示股价已反应越多）。
+    基于「上次财报公告日 → 今日」的涨跌幅做经验映射：
+    - >30% → 90 分（真空期已大幅兑现预期）
+    - 15-30% → 60 分（部分消化，仍有空间）
+    - 0-15% → 30 分（未充分消化）
+    - 下跌 → 10 分（未消化/甚至超调）
+
+    逻辑：如果上次财报披露后股价已经涨了 30%+，
+    说明市场可能已经在交易「下一次财报会很好」的预期，
+    此时即便实际财报超预期，股价也可能「利好出尽」。
+    """
+    if price_change_vacuum > 30:
+        return 90
+    elif price_change_vacuum > 15:
+        return 60
+    elif price_change_vacuum > 0:
+        return 30
+    else:
+        return 10
+
+
 def calc_preemption_score(
     actual_rev_yoy: float,
     actual_profit_yoy: float,
     expected_rev_yoy: float,
     expected_profit_yoy: float,
     price_change_5d: float = 0,
+    price_change_vacuum: float = 0,
 ) -> Dict:
     """
     公式化计算 Preemption 入场时机评分。
@@ -111,7 +135,11 @@ def calc_preemption_score(
         actual_rev_yoy, actual_profit_yoy,
         expected_rev_yoy, expected_profit_yoy,
     )
-    priced_in = calc_priced_in_score(price_change_5d)
+    priced_in_5d = calc_priced_in_score(price_change_5d)
+    priced_in_vacuum = calc_vacuum_period_score(price_change_vacuum)
+
+    # 真空期权重更高（0.7），因为跨财报窗口的价格行为更能反映「预期是否已被定价」
+    priced_in = 0.3 * priced_in_5d + 0.7 * priced_in_vacuum
 
     # 合成：基本面越好 + 消化越少 = 分数越高
     raw = fundamental * (1 - priced_in / 100) * 1.2
@@ -122,7 +150,9 @@ def calc_preemption_score(
         f"实际营收同比 {actual_rev_yoy:+.2f}% vs 预期 {expected_rev_yoy:+.2f}% → 偏离 {((actual_rev_yoy-expected_rev_yoy)/abs(expected_rev_yoy)*100) if expected_rev_yoy else 0:+.1f}%；"
         f"实际净利润同比 {actual_profit_yoy:+.2f}% vs 预期 {expected_profit_yoy:+.2f}% → 偏离 {((actual_profit_yoy-expected_profit_yoy)/abs(expected_profit_yoy)*100) if expected_profit_yoy else 0:+.1f}%；"
         f"基本面偏离分 = {fundamental:.0f}；"
-        f"最近5日涨幅 {price_change_5d:+.2f}% → 消化度 = {priced_in:.0f}；"
+        f"最近5日涨幅 {price_change_5d:+.2f}% → 短期消化度 = {priced_in_5d:.0f}；"
+        f"上次财报公告至今涨幅 {price_change_vacuum:+.2f}% → 真空期消化度 = {priced_in_vacuum:.0f}；"
+        f"综合消化度 = 0.3×{priced_in_5d:.0f} + 0.7×{priced_in_vacuum:.0f} = {priced_in:.0f}；"
         f"合成 = {fundamental:.0f} × (1-{priced_in/100:.2f}) × 1.2 = {score:.0f}"
     )
 
@@ -130,8 +160,11 @@ def calc_preemption_score(
         "score": round(score),
         "fundamental": round(fundamental),
         "priced_in": round(priced_in),
+        "priced_in_5d": round(priced_in_5d),
+        "priced_in_vacuum": round(priced_in_vacuum),
         "rev_diff": round((actual_rev_yoy - expected_rev_yoy) / abs(expected_rev_yoy) * 100, 2) if expected_rev_yoy else 0,
         "profit_diff": round((actual_profit_yoy - expected_profit_yoy) / abs(expected_profit_yoy) * 100, 2) if expected_profit_yoy else 0,
+        "price_change_vacuum": round(price_change_vacuum, 2),
         "details": details,
     }
 
@@ -140,6 +173,7 @@ def build_preemption_score_from_prompt_data(
     financial_md: str,
     expectation_md: str,
     price_change_5d: float = 0,
+    price_change_vacuum: float = 0,
 ) -> Optional[Dict]:
     """
     从 prompt 注入的 Markdown 数据中提取数字，自动计算 Preemption 评分。
@@ -159,4 +193,5 @@ def build_preemption_score_from_prompt_data(
         expected_rev_yoy=expected["revenue_yoy"],
         expected_profit_yoy=expected["profit_yoy"],
         price_change_5d=price_change_5d,
+        price_change_vacuum=price_change_vacuum,
     )

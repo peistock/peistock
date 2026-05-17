@@ -2,11 +2,10 @@
 """
 api_server.py — RROS HTTP API（供 peistock 前端调用）
 
-运行: PYTHONPATH=~/family-mind uvicorn api_server:app --port 8000
+运行: uvicorn api_server:app --port 8000
 """
 import os
 import re
-import sys
 import json
 import logging
 import threading
@@ -18,18 +17,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
 
 ARCHIVE_DIR = ROOT / "data" / "archives"
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
-FM_ROOT = os.path.expanduser("~/family-mind")
-if FM_ROOT not in sys.path:
-    sys.path.insert(0, FM_ROOT)
-
 from dotenv import load_dotenv
-# 项目约定：rebel_research 自身不维护 .env，LLM 配置唯一来源是 family-mind/.env
-load_dotenv(os.path.join(FM_ROOT, ".env"), override=True)
+# LLM 配置来源：项目根目录 .env
+load_dotenv(ROOT / ".env", override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,6 +79,28 @@ class _LLMProxy:
             object.__setattr__(self, name, value)
         else:
             setattr(self._llm, name, value)
+
+    def chat_messages(self, messages, model=None, max_tokens=4096, temperature=0.7):
+        """代理 chat_messages，传入自己的 reasoning_effort 覆盖值。"""
+        return self._llm.chat_messages(
+            messages=messages,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            reasoning_effort=self.reasoning_effort,
+        )
+
+    def chat(self, system, user_prompt, model=None, max_tokens=1500, temperature=0.7, json_mode=False):
+        """代理 chat，传入自己的 reasoning_effort 覆盖值。"""
+        return self._llm.chat(
+            system=system,
+            user_prompt=user_prompt,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=json_mode,
+            reasoning_effort=self.reasoning_effort,
+        )
 
 
 def _generate_stock_decision_card(code: str, date_str: str, chair_content: str):
@@ -192,12 +208,13 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             _jobs[task_id]["status"] = "running"
             _jobs[task_id]["progress"] = "Bull/Bear 并行分析中..."
 
-        # Phase 1: Bull / Bear 并行（reasoning_effort=None，线程安全代理）
-        llm_none = _LLMProxy(inst.llm, None)
+        # Phase 1: Bull / Bear 并行（reasoning_effort=None，按角色模型选择）
+        llm_bull = _LLMProxy(inst._get_llm_for_role(inst.roles["bull"]), None)
+        llm_bear = _LLMProxy(inst._get_llm_for_role(inst.roles["bear"]), None)
         try:
             futures = {
-                _inner_pool.submit(inst.run_analyst, "bull", date_str, context=ctx, llm=llm_none): "bull",
-                _inner_pool.submit(inst.run_analyst, "bear", date_str, context=ctx, llm=llm_none): "bear",
+                _inner_pool.submit(inst.run_analyst, "bull", date_str, context=ctx, llm=llm_bull): "bull",
+                _inner_pool.submit(inst.run_analyst, "bear", date_str, context=ctx, llm=llm_bear): "bear",
             }
             for fut in as_completed(futures):
                 role = futures[fut]
@@ -212,12 +229,13 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
         with _jobs_lock:
             _jobs[task_id]["progress"] = "Preemption / Sentiment 并行分析中..."
 
-        # Phase 2: Preemption + Sentiment 并行（reasoning_effort=high）
-        llm_high = _LLMProxy(inst.llm, "high")
+        # Phase 2: Preemption + Sentiment 并行（reasoning_effort=high，按角色模型选择）
+        llm_preemption = _LLMProxy(inst._get_llm_for_role(inst.roles["preemption"]), "high")
+        llm_sentiment = _LLMProxy(inst._get_llm_for_role(inst.roles["sentiment"]), "high")
         try:
             futures = {
-                _inner_pool.submit(inst.run_analyst, "preemption", date_str, context=ctx, llm=llm_high): "preemption",
-                _inner_pool.submit(inst.run_analyst, "sentiment", date_str, context=ctx, llm=llm_high): "sentiment",
+                _inner_pool.submit(inst.run_analyst, "preemption", date_str, context=ctx, llm=llm_preemption): "preemption",
+                _inner_pool.submit(inst.run_analyst, "sentiment", date_str, context=ctx, llm=llm_sentiment): "sentiment",
             }
             for fut in as_completed(futures):
                 role = futures[fut]
@@ -232,9 +250,10 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
         with _jobs_lock:
             _jobs[task_id]["progress"] = "Chair 投委会裁决中..."
 
-        # Phase 3: Chair（reasoning_effort=high）
+        # Phase 3: Chair（reasoning_effort=high，按角色模型选择）
+        llm_chair = _LLMProxy(inst._get_llm_for_role(inst.roles["chair_debate"]), "high")
         try:
-            path = inst.run_analyst("chair_debate", date_str, context=ctx, llm=llm_high)
+            path = inst.run_analyst("chair_debate", date_str, context=ctx, llm=llm_chair)
         except Exception as e:
             logger.error(f"[{code}] Chair 分析失败: {e}")
             path = None
@@ -243,8 +262,11 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             content = path.read_text(encoding="utf-8")
 
             # 生成决策卡 JSON（供历史接口和 recent_decisions 使用）
+            card = {}
             try:
-                _generate_stock_decision_card(code, date_str, content)
+                card_path = _generate_stock_decision_card(code, date_str, content)
+                if card_path and card_path.exists():
+                    card = json.loads(card_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.warning(f"[{code}] 决策卡生成失败: {e}")
 
@@ -257,6 +279,8 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
                         "status": "completed",
                         "report_path": str(path),
                         "report_preview": content[:8000],
+                        "conviction": card.get("conviction", 0),
+                        "decision": card.get("decision", "unknown"),
                     },
                     "progress": "分析完成",
                 })
@@ -308,6 +332,14 @@ def analyze_stock(code: str, signal: str = "B"):
     cache_path = ARCHIVE_DIR / f"{date_str}_{code}_chair_debate.md"
     if _all_exist and cache_path.exists():
         content = cache_path.read_text(encoding="utf-8")
+        # 读取已生成的决策卡，补充 conviction/decision
+        card_path = ROOT / "data" / "stock_decisions" / f"{code}_{date_str}.json"
+        card = {}
+        if card_path.exists():
+            try:
+                card = json.loads(card_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
         task_id = f"cached_{code}_{date_str}"
         with _jobs_lock:
             _jobs[task_id] = {
@@ -322,6 +354,8 @@ def analyze_stock(code: str, signal: str = "B"):
                     "status": "completed",
                     "report_path": str(cache_path),
                     "report_preview": content[:8000],
+                    "conviction": card.get("conviction", 0),
+                    "decision": card.get("decision", "unknown"),
                 },
             }
         logger.info(f"[{code}] 当日缓存命中，直接返回: {task_id}")
@@ -679,6 +713,20 @@ def backtest_stock(code: str):
         return {"status": "ok", "code": code, "data": stats}
     except Exception as e:
         logger.error(f"[backtest/stock/{code}] 失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/backtest/signals/{code}")
+def backtest_signals(code: str):
+    """信号级回测：逐日检测 B/S 信号，计算每个信号的持有期统计，以及当前条件最相似的历史日期回测。"""
+    try:
+        from core.signal_backtest import run_signal_backtest
+        result = run_signal_backtest(code)
+        if not result:
+            return {"status": "ok", "message": "无回测数据", "code": code, "data": None}
+        return {"status": "ok", "code": code, "data": result}
+    except Exception as e:
+        logger.error(f"[backtest/signals/{code}] 失败: {e}")
         return {"status": "error", "message": str(e)}
 
 

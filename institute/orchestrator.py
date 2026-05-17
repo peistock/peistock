@@ -1,17 +1,12 @@
 """
 投研角色自动化编排系统（Research Institute）
 
-独立项目，依赖 FamilyMind 的 mind/ 模块作为外部库。
-运行前需确保 PYTHONPATH 包含 family-mind 目录。
-
 设计原则：
-- 不修改 FamilyMind 任何代码
-- 通过子类化覆盖需要定制的行为（如禁用 guardrail）
 - 角色纯 YAML 配置，不硬编码在 Python 中
+- 独立运行，不依赖外部项目
 """
 import os
 import re
-import sys
 import yaml
 import logging
 from pathlib import Path
@@ -19,16 +14,8 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# 把 FamilyMind 的 mind/ 加入 Python 路径
-_FAMILY_MIND_ROOT = Path.home() / "family-mind"
-if str(_FAMILY_MIND_ROOT) not in sys.path:
-    sys.path.insert(0, str(_FAMILY_MIND_ROOT))
-
-from mind.agent_loop import AgentLoop
-from mind.agent_message import AgentMessage
-from mind.llm_client import LLMClient
-from mind.tools import Toolkit
-from mind.todo_store import TodoStore
+from institute.mind.agent_message import AgentMessage
+from institute.mind.llm_client import LLMClient
 from .vector_store import get_vector_store
 from .topic_generator import TopicGenerator
 from .fact_check import fact_check_report, format_fact_check
@@ -41,40 +28,6 @@ ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 # 角色配置目录（统一：rebel_research/roles/）
 ROLES_DIR = Path(__file__).parent.parent / "roles"
-
-
-class ResearchAgentLoop(AgentLoop):
-    """投研专用 AgentLoop：禁用 guardrail，避免搜索后写报告被反复拦截"""
-
-    @staticmethod
-    def _guardrail_requires_tools(messages):
-        # 投研场景：分析师已主动调用搜索工具，guardrail 不再需要
-        return False
-
-    def _build_max_iter_reply(self) -> str:
-        """覆盖：迭代超限时返回专业话术，禁止输出'刚子AI分身'或'请回复继续'。"""
-        # 检查工作目录是否有写入的文件
-        files = []
-        try:
-            for p in self.work_dir.rglob("*"):
-                if p.is_file() and p.stat().st_size > 100:
-                    rel = p.relative_to(self.work_dir)
-                    files.append(f"- {rel}（{p.stat().st_size // 1024}KB）")
-        except Exception:
-            pass
-
-        if files:
-            file_list = "\n".join(files[:5])
-            return (
-                f"报告已输出至工作目录，但当前回复未包含完整内容。\n\n"
-                f"已生成文件：\n{file_list}\n\n"
-                f"请查阅上述文件获取完整分析。"
-            )
-
-        return (
-            "（分析迭代次数已达上限，但报告内容未正常输出。"
-            "请检查预注入数据是否充分，或联系技术排查。）"
-        )
 
 
 class AnalystRole:
@@ -136,6 +89,8 @@ class ResearchInstitute:
                 client.model_daily = model_name
                 client.model_complex = model_name
                 client.model_summary = model_name
+                # 冻结备用配置：覆盖 _init 防止 chat_with_tools/chat 运行时重置回默认端点
+                client._init = lambda: None
                 alt_llms[model_name] = client
                 logger.info(f"备用模型客户端已创建: {model_name} @ {base_url}")
                 # 恢复单例
@@ -225,19 +180,15 @@ class ResearchInstitute:
             logger.warning(f"腾讯 API 回退也失败 {code}: {e}")
             return None
 
-    def _fetch_tencent_indicators(self, code: str) -> Optional[str]:
+    def _fetch_tencent_klines(self, code: str):
         """
-        直连腾讯财经 API 获取 K 线 + 实时行情，用 Python 指标引擎计算。
-        与前端 peistock 使用完全同源的数据，避免 akshare mock 失真。
+        直连腾讯财经 API 获取 K 线 + 实时行情。
+        返回 (records, name, price, prev_close, tencent_symbol)，供指标计算和真空期分析复用。
         """
         import urllib.request
         import json
-        from datetime import datetime
-        from core.indicators import calculate_all_indicators
-        from core.signal_detector import detect_signals, build_signal_input
 
-        clean = re.sub(r'[^0-9]', '', code)  # 提取纯数字
-        # 港股 5 位，A 股 6 位
+        clean = re.sub(r'[^0-9]', '', code)
         if len(clean) == 5:
             tencent_symbol = f"hk{clean}"
             market = "hk"
@@ -265,8 +216,6 @@ class ResearchInstitute:
         if not klines:
             raise ValueError("无 K 线数据")
 
-        # 解析 K 线 [日期, 开盘, 收盘, 最低, 最高, 成交量]
-        # A股主板/创业板=手(×100)，科创板=股，港股=股
         is_hk = tencent_symbol.startswith("hk")
         is_keb = clean.startswith("688")
 
@@ -286,7 +235,7 @@ class ResearchInstitute:
         if len(records) < 60:
             raise ValueError(f"K 线数据不足: {len(records)} 条")
 
-        # 2. 获取实时行情（含流通股本）
+        # 2. 获取实时行情
         quote_url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,1,qfq"
         req2 = urllib.request.Request(quote_url, headers={
             "Accept": "application/json",
@@ -299,27 +248,51 @@ class ResearchInstitute:
         name = qt[1] or code
         price = float(qt[3]) if qt[3] else 0
         prev_close = float(qt[4]) if qt[4] else 0
+
+        return records, name, price, prev_close, tencent_symbol
+
+    def _fetch_tencent_indicators(self, code: str) -> Optional[str]:
+        """
+        直连腾讯财经 API 获取 K 线 + 实时行情，用 Python 指标引擎计算。
+        与前端 peistock 使用完全同源的数据，避免 akshare mock 失真。
+        """
+        from core.indicators import calculate_all_indicators
+        from core.signal_detector import detect_signals, build_signal_input
+
+        records, name, price, prev_close, tencent_symbol = self._fetch_tencent_klines(code)
+        market = "hk" if tencent_symbol.startswith("hk") else "a"
         change_pct = ((price - prev_close) / prev_close * 100) if prev_close > 0 else 0
 
         # 流通股本：港股 idx 70，A股 idx 72
+        clean = re.sub(r'[^0-9]', '', code)
+        import urllib.request
+        import json
+        quote_url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,1,qfq"
+        req2 = urllib.request.Request(quote_url, headers={
+            "Accept": "application/json",
+            "Referer": "https://stock.qq.com",
+        })
+        with urllib.request.urlopen(req2, timeout=10) as resp2:
+            quote_data = json.loads(resp2.read().decode("utf-8"))
+        qt = quote_data["data"][tencent_symbol]["qt"][tencent_symbol]
+
         capital = 0
         if market == "hk":
             capital = int(float(qt[70])) if len(qt) > 70 and qt[70] else 0
         else:
             capital = int(float(qt[72])) if len(qt) > 72 and qt[72] else 0
 
-        # 3. 本地 fallback 流通股本
         if capital <= 0:
             from core.data_layer import DataLayer
             capital = DataLayer().get_stock_capital(code)
 
-        # 4. 计算 5 日涨幅
+        # 计算 5 日涨幅
         change_5d = 0
         if len(records) >= 6:
             price_5d_ago = records[-6]["close"]
             change_5d = (price - price_5d_ago) / price_5d_ago * 100
 
-        # 5. 计算指标
+        # 计算指标
         indicators_list = calculate_all_indicators(records, capital, capital_unit="shares")
         if not indicators_list:
             raise ValueError("指标计算失败")
@@ -327,13 +300,11 @@ class ResearchInstitute:
         latest = indicators_list[-1]
         date_str = str(latest.get("date", ""))
 
-        # 5. 信号检测
         sig_input = build_signal_input(indicators_list)
         signals = detect_signals(sig_input)
         strict_sigs = signals.get("strict", [])
         sig_type = signals.get("signalType", "—")
 
-        # Python 指标引擎返回 snake_case 字段，兼容两种命名
         cri_pct = latest.get('cri_percentile', latest.get('criPercentile', 0))
         greedy_pct = latest.get('greedy_percentile', latest.get('greedyPercentile', 0))
         bias225_pct = latest.get('bias225_percentile', latest.get('bias225Percentile', 0))
@@ -355,6 +326,37 @@ class ResearchInstitute:
         ]
         logger.info(f"腾讯 API 指标计算成功: {code}")
         return "\n".join(lines)
+
+    def _calc_vacuum_period_change(self, code: str, announce_date: str) -> Optional[float]:
+        """
+        计算「上次财报公告日 → 今日」的涨跌幅（真空期涨跌幅）。
+        如果 announce_date 在 K 线数据中找不到，返回 None。
+        """
+        try:
+            records, name, price, prev_close, _ = self._fetch_tencent_klines(code)
+            if price <= 0 or not announce_date:
+                return None
+
+            # announce_date 格式通常是 YYYY-MM-DD，K 线日期是 YYYYMMDD 或 YYYY-MM-DD
+            target_date = announce_date.replace("-", "")
+
+            # 找公告日或之后第一个交易日的收盘价
+            entry_price = None
+            for r in records:
+                r_date = str(r["date"]).replace("-", "")
+                if r_date >= target_date:
+                    entry_price = r["close"]
+                    break
+
+            if entry_price is None or entry_price <= 0:
+                return None
+
+            change = (price - entry_price) / entry_price * 100
+            logger.info(f"[{code}] 真空期涨跌幅: {announce_date} → 今日, 入口价={entry_price:.2f}, 当前={price:.2f}, 变化={change:+.2f}%")
+            return change
+        except Exception as e:
+            logger.warning(f"[{code}] 真空期涨跌幅计算失败: {e}")
+            return None
 
     def _fetch_sentiment_data(self, code: str) -> Optional[str]:
         """
@@ -446,23 +448,6 @@ class ResearchInstitute:
             return report_path
 
         logger.info(f"[{slug}] 开始执行 {role.name}")
-
-        work_dir = ARCHIVE_DIR / ".tmp" / f"{date_str}{code_suffix}_{slug}"
-        work_dir.mkdir(parents=True, exist_ok=True)
-        toolkit = Toolkit(work_dir)
-        # 生产环境无本地 peistock API，屏蔽 query_peistock 避免 LLM 调用失败
-        toolkit._registry._tools.pop("query_peistock", None)
-        toolkit._registry._meta.pop("query_peistock", None)
-        # JD Cloud 服务器网络受限（GFW），禁用所有外网抓取工具，强制 LLM 使用 searxng_proxy 搜索
-        for _bad_tool in ("browse_open", "browse_click", "browse_fill",
-                           "browse_screenshot", "browse_scroll", "browse_text",
-                           "fetch_webpage", "jina_reader", "find_chrome_url"):
-            toolkit._registry._tools.pop(_bad_tool, None)
-            toolkit._registry._meta.pop(_bad_tool, None)
-        # 禁止 LLM 写文件/执行代码（必须直接在回复中输出完整报告）
-        for _no_write in ("write_file", "execute_code", "pip_install", "md_to_pdf"):
-            toolkit._registry._tools.pop(_no_write, None)
-            toolkit._registry._meta.pop(_no_write, None)
         today = datetime.now().strftime("%Y年%m月%d日")
         system_prompt = self._build_system_prompt(role, today, context=context)
 
@@ -534,6 +519,7 @@ class ResearchInstitute:
             if slug == "preemption":
                 try:
                     from core.preemption_scorer import build_preemption_score_from_prompt_data
+                    from core.financial_data import extract_announce_date
                     # 提取 5 日涨幅（优先从预注入的 peistock 数据）
                     price_change_5d = 0
                     peistock_text = peistock_data or ""
@@ -548,10 +534,31 @@ class ResearchInstitute:
                     if context and context.get("price_change_5d"):
                         price_change_5d = float(context.get("price_change_5d"))
 
+                    # 计算跨财报真空期涨跌幅（上次财报公告日 → 今日）
+                    price_change_vacuum = 0
+                    announce_date = extract_announce_date(fin_data or "")
+                    if announce_date:
+                        vacuum_change = self._calc_vacuum_period_change(code, announce_date)
+                        if vacuum_change is not None:
+                            price_change_vacuum = vacuum_change
+                            # 注入真空期数据供分析师参考
+                            vacuum_md = (
+                                f"【跨财报真空期价格数据 · {code}】\n\n"
+                                f"上次财报公告日: {announce_date}\n"
+                                f"从上次财报公告日至今涨跌幅: {price_change_vacuum:+.2f}%\n\n"
+                                f"此数据用于判断「真空期定价」：\n"
+                                f"- 如果上次财报后股价已大涨 30%+，说明市场可能已在交易「下次财报超预期」的预期\n"
+                                f"- 如果真空期股价几乎没涨甚至下跌，而实际财报显著超预期 → 存在真正的预期差\n"
+                                f"- 分析时必须结合此数据，不要只看最近 5 日涨幅"
+                            )
+                            messages.append(AgentMessage.user(vacuum_md))
+                            logger.info(f"[preemption] 注入真空期数据: {announce_date} → 今日 {price_change_vacuum:+.2f}%")
+
                     score_result = build_preemption_score_from_prompt_data(
                         financial_md=fin_data or "",
                         expectation_md=exp_data or "",
                         price_change_5d=price_change_5d,
+                        price_change_vacuum=price_change_vacuum,
                     )
                     if score_result:
                         score_md = (
@@ -560,9 +567,12 @@ class ResearchInstitute:
                             f"你的任务是解释这个评分并验证其合理性：\n\n"
                             f"- **入场时机评分**: {score_result['score']}/100\n"
                             f"  - 基本面偏离分: {score_result['fundamental']}/100\n"
-                            f"  - 价格消化度: {score_result['priced_in']}/100（越高表示股价已反应越多）\n"
+                            f"  - 综合价格消化度: {score_result['priced_in']}/100（越高表示股价已反应越多）\n"
+                            f"    - 短期消化度(5日): {score_result.get('priced_in_5d', 0)}/100\n"
+                            f"    - 真空期消化度(财报至今): {score_result.get('priced_in_vacuum', 0)}/100  ← 权重 70%\n"
                             f"  - 营收偏离: {score_result['rev_diff']:+.2f}%\n"
                             f"  - 净利润偏离: {score_result['profit_diff']:+.2f}%\n"
+                            f"  - 真空期涨跌幅: {score_result.get('price_change_vacuum', 0):+.2f}%\n"
                             f"- **计算过程**: {score_result['details']}\n\n"
                             f"评分含义：100=信息完全未被消化（最佳入场点）；0=已被完全消化（入场即接盘）。\n"
                             f"你的输出中「预判结论」部分的「入场时机评分」**必须使用此系统评分 {score_result['score']} 分**，"
@@ -617,40 +627,16 @@ class ResearchInstitute:
         pass
 
         llm_for_role = llm or self._get_llm_for_role(role)
-        loop = ResearchAgentLoop(
-            llm=llm_for_role,
-            toolkit=toolkit,
-            todo_store=TodoStore(),
-            work_dir=work_dir,
-            event_sink=None,
-        )
 
         try:
-            result = loop.run(messages, max_iterations=12)
-            reply = result.get("reply", "")
+            reply = llm_for_role.chat_messages(
+                messages=[m.to_llm() for m in messages],
+                model=role.model,
+                max_tokens=role.max_tokens,
+                temperature=role.temperature,
+            )
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
-            # 兜底：强制替换 FamilyMind 人设污染关键词
-            contaminated = "刚子AI分身" in reply or "您回复" in reply or "联系爸爸" in reply
-            if contaminated:
-                reply = (
-                    "（报告生成过程中遇到迭代限制，原始输出被拦截。"
-                    "以下为基于已有数据的最佳努力输出。）\n\n"
-                    + reply.replace("刚子AI分身", "AI分析师")
-                    .replace("您回复「继续」，我接着干～", "")
-                    .replace("您回复『继续』，我就接着把剩下的做完！", "")
-                    .replace("请您稍后再试，或者联系爸爸帮忙看看。", "请稍后再试或联系技术支持。")
-                )
-
-            # Fallback：如果 reply 过短，尝试读取工作目录中 LLM 写入的文件
-            if len(reply.strip()) < 200:
-                written_files = list(work_dir.glob("*.md"))
-                if written_files:
-                    # 取最大的文件（最可能是完整报告）
-                    largest = max(written_files, key=lambda p: p.stat().st_size)
-                    if largest.stat().st_size > 500:
-                        logger.info(f"[{slug}] reply 过短，fallback 读取工作目录文件: {largest.name}")
-                        reply = largest.read_text(encoding="utf-8")
 
             report_content = self._format_report(role, today, reply)
 
@@ -833,7 +819,7 @@ class ResearchInstitute:
             "5. 不要输出任何 thinking、reasoning 或 thought 标签，直接输出最终报告",
             "6. 直接在最终回复中输出完整报告全文，不要调用 write_file 工具写入文件",
             "7. 禁止写代码、禁止创建文件、禁止执行脚本——所有分析必须在同一条回复中用自然语言完成",
-            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。严禁在报告中提及"搜索不可用""搜索失败""无法获取最新消息"等任何关于工具失败的描述——读者不需要知道工具是否工作，只需要看到完整的分析结论。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
+            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。严禁在报告中提及「搜索不可用」「搜索失败」「无法获取最新消息」等任何关于工具失败的描述——读者不需要知道工具是否工作，只需要看到完整的分析结论。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
         ])
         if role.tools:
             lines.append(f"9. 你可以使用的工具: {', '.join(role.tools)}")

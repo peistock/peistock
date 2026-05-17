@@ -127,7 +127,7 @@ node test-scripts/test_percentile.mjs
 
 ## HTTP API Server (api_server.py)
 
-启动：`PYTHONPATH=~/family-mind uvicorn api_server:app --port 8000`
+启动：`.venv/bin/uvicorn api_server:app --port 8000`（项目已自包含，不再需要 PYTHONPATH）
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -141,7 +141,7 @@ node test-scripts/test_percentile.mjs
 | `/api/stock/:code/report-history` | GET | 查询个股历史 AI 分析报告摘要 |
 | `/health` | GET | 健康检查 |
 
-供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。
+供前端（peistock）调用，支持查询任意股票（不限股票池）。
 
 ## 部署信息
 

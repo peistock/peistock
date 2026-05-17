@@ -32,15 +32,12 @@ STOCK_DECISIONS_DIR = DATA / "stock_decisions"
 WINRATE_CACHE = DATA / "winrate_cache.json"
 SNAPSHOT_TTL_SEC = 300
 
-FM_ROOT = os.path.expanduser("~/family-mind")
-
 # ── Research Institute 编排器(懒加载,避免启动时耗时) ──
 _institute = None
 
 def _get_institute():
     global _institute
     if _institute is None:
-        sys.path.insert(0, str(ROOT))
         from institute.orchestrator import ResearchInstitute
         _institute = ResearchInstitute()
     return _institute
@@ -544,13 +541,10 @@ def _render_history_table(cards: list, filter_decision: str = "all") -> Tuple[st
 # 触发动作(调 LLM / akshare)
 # ════════════════════════════════════════════════════════════════════
 
-def _run_with_fm_pythonpath(args: list, timeout: int) -> str:
-    env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = FM_ROOT + (os.pathsep + existing if existing else "")
+def _run_subprocess(args: list, timeout: int) -> str:
     try:
         result = subprocess.run(
-            args, capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=timeout
+            args, capture_output=True, text=True, cwd=str(ROOT), timeout=timeout
         )
         log = result.stdout
         if result.stderr:
@@ -574,8 +568,6 @@ def _stream_subprocess(args: list, timeout: int, label: str = "运行中"):
     最后一次 yield 是完整 log(不带运行中提示)。
     """
     env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = FM_ROOT + (os.pathsep + existing if existing else "")
     env["PYTHONUNBUFFERED"] = "1"  # 让子进程实时 flush stdout,否则行缓冲会被块缓冲覆盖
 
     try:
@@ -705,7 +697,7 @@ def run_stock_analysis(code: str):
 
 
 def run_backtest_mock() -> Tuple[str, str, list]:
-    log = _run_with_fm_pythonpath(
+    log = _run_subprocess(
         [sys.executable, str(ROOT / "main_backtest.py"), "--mock"], timeout=300
     )
     summary, rows = load_backtest()
