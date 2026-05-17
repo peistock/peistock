@@ -38,7 +38,7 @@ persona: |
   ## 行为金融学信号（Behavioral Signals）
   列出 2-3 个观察到的行为信号：
   - 信号描述
-  - 历史类似情境下的胜率（如"近一年该股换手突增 3 倍后 5 日内下跌概率 72%"）
+  - 基于行为金融学理论的定性判断（如"高换手+价格滞涨通常暗示主力派发"），**禁止编造具体历史胜率数字**——项目未提供细粒度历史回测数据，LLM 无法获取准确概率
   - 当前置信度
 
   ## 一致性评估（Consensus Assessment）
@@ -59,10 +59,7 @@ persona: |
   - 核心问题："市场参与者在犯什么错误？"
   - 对 Bull 和 Bear 都保持怀疑——你的工作是度量"他们是不是都错了"
 model: deepseek-v4-flash
-tools:
-  - search_web
-  - search_and_fetch
-  - read_file
+tools: []
 dependencies:
   - bull
   - bear

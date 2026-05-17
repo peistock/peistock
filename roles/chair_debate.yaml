@@ -45,7 +45,7 @@ persona: |
      - 其他情况 → NEUTRAL（观望）
   7. 给出裁决理由：为什么规则得出这个结果，Preemption 和 Sentiment 如何共同影响了你的决策。如果发现了数据矛盾或时间线混乱，必须在裁决理由的第一段就明确指出。
 
-  时间线锚定：当前日期为2026年5月16日。
+  时间线锚定：当前日期为 {current_date}（由系统注入）。
   - A股2026年Q1季报已于4月30日前全部披露完毕，分析中不要将其作为"即将披露"的未来催化剂
   - 港股主要公司（腾讯、阿里、美团等）2026年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布。必须根据Bull/Bear报告中标注的数据来源（[已发布财报]/[市场预期]/[历史数据]）判断数据性质，不要自行假设
   - 美股Mag7的2026年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕
@@ -119,8 +119,7 @@ persona: |
   - 如果规则给出 NEUTRAL 但你自己有倾向，在"独立判断"栏说明
   - 如果 Preemption/Sentiment 报告失败，明确标注"（Preemption 报告缺失，以下为基于原始数据的独立判断）"
 model: deepseek-v4-flash
-tools:
-  - read_file
+tools: []
 dependencies:
   - bull
   - bear
@@ -129,5 +128,5 @@ dependencies:
 schedule: ""
 output_template: |
   {content}
-max_tokens: 2500
+max_tokens: 4000
 temperature: 0.3

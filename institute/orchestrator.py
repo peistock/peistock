@@ -707,17 +707,37 @@ class ResearchInstitute:
             "",
         ]
 
-        # 个股分析时追加财报时间线锚定
+        # 个股分析时追加财报时间线锚定（基于当前日期动态推断）
         if context and context.get("code"):
+            now = datetime.now()
+            year = now.year
+            month = now.month
+            # A股：Q1(4月底) / 半年报(8月底) / Q3(10月底) / 年报(次年4月底)
+            # 动态推断最新已披露财报
+            if month >= 5:
+                latest_a = f"{year}年Q1季报"
+                latest_a_deadline = f"{year}年4月30日"
+            elif month >= 9:
+                latest_a = f"{year}年半年报"
+                latest_a_deadline = f"{year}年8月31日"
+            elif month >= 11:
+                latest_a = f"{year}年Q3季报"
+                latest_a_deadline = f"{year}年10月31日"
+            else:
+                latest_a = f"{year - 1}年年报"
+                latest_a_deadline = f"{year}年4月30日"
+
             lines.append("财报时间线锚定（必须遵守）：")
-            lines.append("- A股2026年Q1季报已于2026年4月30日前全部披露完毕，分析中不得将其视为'即将披露'的未来催化剂")
-            lines.append("- 港股主要公司2026年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布")
-            lines.append("- 美股Mag7的2026年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕")
+            lines.append(f"- A股{latest_a}已于{latest_a_deadline}前全部披露完毕，分析中不得将其视为'即将披露'的未来催化剂")
+            lines.append(f"- 港股主要公司{year}年Q1财报通常在5月中旬发布，截至今日可能已发布也可能尚未发布")
+            lines.append(f"- 美股Mag7的{year}年Q1财报通常在4月下旬至5月初发布，截至今日应已全部披露完毕")
             lines.append("- 严禁基于已披露财报进行'可能''或将''预计'等猜测性表述；已披露的数据就是事实，未披露的数据才能使用预期")
             lines.append("")
 
+        # 替换 persona 中的动态占位符
+        persona_text = role.persona.replace("{current_date}", today)
         lines.extend([
-            role.persona,
+            persona_text,
             "",
             "执行规则：",
             "1. 你需要主动使用工具收集实时信息，不要依赖已有知识",
