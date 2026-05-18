@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History } from 'lucide-react';
+import { AlertCircle, Clock, Calendar, BarChart2, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History, User, LogOut } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockPool from './components/StockPool';
 import StockChart from './components/StockChart';
@@ -20,7 +20,8 @@ import BacktestPanel from './components/BacktestPanel';
 import SignalBacktestPanel from './components/SignalBacktestPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
-import { getStockPool, addToStockPool, migrateLegacyFavorites } from './data/watchlist';
+import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend } from './data/watchlist';
+import { getAuth, setAuth, clearAuth, isLoggedIn } from './utils/auth';
 // 时间维度类型
 type TimeframeType = 'daily' | 'weekly' | 'min15';
 
@@ -74,6 +75,12 @@ function App() {
   // 信号版本切换：严格版(默认) / 宽松版
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
 
+  // 账号系统
+  const [authAccount, setAuthAccount] = useState<string>(getAuth()?.account || '');
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginInput, setLoginInput] = useState({ account: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+
   // AI 投研分析 — 后台多任务队列
   const [backgroundJobs, setBackgroundJobs] = useState<Record<string, BackgroundJob>>({});
   const [showReport, setShowReport] = useState(false);
@@ -112,6 +119,42 @@ function App() {
   const refreshPool = useCallback(() => {
     setStockPool(getStockPool());
   }, []);
+
+  // 登录状态下，从后端同步股票池
+  useEffect(() => {
+    if (isLoggedIn()) {
+      loadWatchlistFromBackend().then(() => {
+        refreshPool();
+      });
+    }
+  }, []);
+
+  const handleLogin = async () => {
+    setLoginError('');
+    if (!loginInput.account.trim() || !loginInput.password.trim()) {
+      setLoginError('请输入账号和密码');
+      return;
+    }
+    // 先保存到本地，再测试后端连通性
+    setAuth(loginInput.account.trim(), loginInput.password.trim());
+    try {
+      const { fetchWatchlist } = await import('./utils/researchApi');
+      await fetchWatchlist();
+      setAuthAccount(loginInput.account.trim());
+      setShowLoginModal(false);
+      setLoginInput({ account: '', password: '' });
+      await loadWatchlistFromBackend();
+      refreshPool();
+    } catch (e: any) {
+      clearAuth();
+      setLoginError(e.message?.includes('401') ? '账号或密码错误' : '登录失败，请检查后端服务');
+    }
+  };
+
+  const handleLogout = () => {
+    clearAuth();
+    setAuthAccount('');
+  };
 
   const inPool = stockInfo ? stockPool.some(s => s.code === stockInfo.symbol) : false;
 
@@ -540,6 +583,31 @@ function App() {
                   公式参考
                 </button>
               </HelpDialog>
+
+              {/* 账号登录 */}
+              {authAccount ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#8B949E]">
+                    <User className="w-3.5 h-3.5 inline mr-1" />
+                    {authAccount}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="text-[#8B949E] hover:text-[#FF3435] transition-colors"
+                    title="退出"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors"
+                >
+                  <User className="w-4 h-4" />
+                  登录
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1613,15 +1681,54 @@ function App() {
         {/* AI 决策验证（回测闭环） */}
         {stockInfo && (
           <section className="mb-6">
-            <BacktestPanel
-              code={stockInfo.symbol}
-              indicators={timeframeData.daily?.indicators}
-            />
+            <BacktestPanel code={stockInfo.symbol} />
           </section>
         )}
       </main>
 
       {/* Footer */}
+      {/* 登录弹窗 */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLoginModal(false)}>
+          <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-6 w-80" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4">账号登录</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[#8B949E] block mb-1">账号</label>
+                <input
+                  type="text"
+                  value={loginInput.account}
+                  onChange={e => setLoginInput(prev => ({ ...prev, account: e.target.value }))}
+                  className="w-full bg-[#0D1117] border border-[#30363D] rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58A6FF]"
+                  placeholder="输入账号"
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[#8B949E] block mb-1">密码</label>
+                <input
+                  type="password"
+                  value={loginInput.password}
+                  onChange={e => setLoginInput(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full bg-[#0D1117] border border-[#30363D] rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58A6FF]"
+                  placeholder="输入密码"
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                />
+              </div>
+              {loginError && (
+                <p className="text-xs text-[#FF3435]">{loginError}</p>
+              )}
+              <button
+                onClick={handleLogin}
+                className="w-full py-2 rounded bg-[#58A6FF] hover:bg-[#58A6FF]/90 text-white text-sm font-medium transition-colors"
+              >
+                登录
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="border-t border-[#30363D] bg-[#161B22] mt-12">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">

@@ -126,7 +126,7 @@ node test-scripts/test_percentile.mjs
 
 ## HTTP API Server (api_server.py)
 
-启动：`PYTHONPATH=~/family-mind uvicorn api_server:app --port 8000`
+启动：`.venv/bin/uvicorn api_server:app --port 8000`（项目已自包含，不再需要 PYTHONPATH）
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -138,6 +138,9 @@ node test-scripts/test_percentile.mjs
 | `/api/roles` | GET | 列出所有加载的角色 |
 | `/api/search/stock?q=` | GET | 代理东方财富搜索（名称/拼音 → 代码） |
 | `/api/stock/:code/report-history` | GET | 查询个股历史 AI 分析报告摘要 |
+| `/api/backtest/signals/:code` | GET | 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 |
+| `/api/backtest/summary` | GET | 全局回测统计（按置信度/Preemption 条件分组） |
+| `/api/backtest/stock/:code` | GET | 单股票回测统计和最近交易记录 |
 | `/health` | GET | 健康检查 |
 
 供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。

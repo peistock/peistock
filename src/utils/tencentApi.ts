@@ -78,7 +78,7 @@ export async function getKlines(
     throw new Error('该股票暂无K线数据');
   }
   
-  // 解析数据 [日期, 开盘, 收盘, 最低, 最高, 成交量]
+  // 解析数据 [日期, 开盘, 收盘, 最高, 最低, 成交量]
   // 腾讯主板/创业板A股返回的是"手"，科创板(688)返回的是"股"，港股返回的是"股"
   const isHK = tencentSymbol.startsWith('hk');
   const isKEB = cleanSymbol(symbol).startsWith('688'); // 科创板
@@ -87,8 +87,8 @@ export async function getKlines(
     date: item[0],
     open: parseFloat(item[1]) || 0,
     close: parseFloat(item[2]) || 0,
-    low: parseFloat(item[3]) || 0,
-    high: parseFloat(item[4]) || 0,
+    high: parseFloat(item[3]) || 0,
+    low: parseFloat(item[4]) || 0,
     // A股成交量：主板/创业板是手(×100)，科创板是股(不×100)，港股是股
     volume: isHK || isKEB ? parseInt(item[5]) || 0 : (parseInt(item[5]) || 0) * 100,
     amount: 0, // 腾讯 API 不直接提供成交额
