@@ -5,6 +5,7 @@ RebelResearchOS - Entry point
 Philosophy: subtraction creates multiplication
 """
 import os
+import sys
 import yaml
 
 
@@ -89,10 +90,9 @@ def main():
     print()
     print("[1/6] Fetching market snapshot...")
     market = dl.get_full_snapshot()
-    print("  - Mag7 dispersion: " + str(market.get("mag7_dispersion")))
-    print("  - Margin concentration: " + str(market.get("margin_concentration")))
     print("  - VIX: " + str(market.get("vix")))
-    print("  - PMI: " + str(market.get("pmi", {}).get("manufacturing")))
+    print("  - A 股龙头离散度: " + str(market.get("a_dispersion")))
+    print("  - HK 龙头离散度: " + str(market.get("hk_dispersion")))
 
     if _check_mock_block(dl, None):
         sys.exit(10)

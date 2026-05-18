@@ -222,12 +222,13 @@ class ResearchInstitute:
         records = []
         for item in klines:
             vol = int(float(item[5])) if is_hk or is_keb else int(float(item[5])) * 100
+            # 腾讯 K 线字段顺序: [date, open, close, high, low, volume]
             records.append({
                 "date": str(item[0]),
                 "open": float(item[1]) if item[1] else 0,
                 "close": float(item[2]) if item[2] else 0,
-                "low": float(item[3]) if item[3] else 0,
-                "high": float(item[4]) if item[4] else 0,
+                "high": float(item[3]) if item[3] else 0,
+                "low": float(item[4]) if item[4] else 0,
                 "volume": vol,
                 "amount": 0.0,
             })
@@ -474,6 +475,18 @@ class ResearchInstitute:
                 logger.info(f"[{slug}] 预注入 peistock 数据: {code}")
                 messages.append(AgentMessage.user(peistock_data))
 
+            # 板块相对强弱背景注入（A 股）
+            sector_ctx = context.get("sector_context") if context else None
+            if sector_ctx:
+                logger.info(f"[{slug}] 预注入板块背景: {code}")
+                messages.append(AgentMessage.user(sector_ctx))
+
+            # 贵金属/有色金属宏观关联注入
+            metal_ctx = context.get("metal_context") if context else None
+            if metal_ctx:
+                logger.info(f"[{slug}] 预注入贵金属宏观视角: {code}")
+                messages.append(AgentMessage.user(metal_ctx))
+
             # Sentiment 角色额外注入融资融券/北向资金/龙虎榜结构化数据
             # Chair 也需要直接读取原始情绪数据，避免三手信息失真
             if slug in ("sentiment", "chair_debate"):
@@ -594,13 +607,13 @@ class ResearchInstitute:
             # Chair 裁决前注入该股票历史验证表现（回测闭环反馈）
             if slug == "chair_debate":
                 try:
-                    from core.backtest_tracker import format_stock_stats_for_prompt
-                    history_md = format_stock_stats_for_prompt(code)
+                    from core.backtest_tracker import format_recent_decisions_for_prompt
+                    history_md = format_recent_decisions_for_prompt(code, limit=3)
                     if history_md:
-                        logger.info(f"[chair] 注入历史验证表现: {code}")
+                        logger.info(f"[chair] 注入历史决策记录: {code}")
                         messages.append(AgentMessage.user(history_md))
                 except Exception as e:
-                    logger.warning(f"[chair] 历史验证表现注入失败: {e}")
+                    logger.warning(f"[chair] 历史决策记录注入失败: {e}")
 
         # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:

@@ -41,45 +41,7 @@ class AnomalyTrigger:
 
         signals = []
 
-        # Signal 1: Mag7 dispersion spike
-        dispersion = market_data.get("mag7_dispersion", 0.0)
-        if dispersion > self.thresholds.get("dispersion_threshold", 0.35):
-            if not self.is_cooldown_active("dispersion_spike"):
-                signals.append(AnomalySignal(
-                    type="dispersion_spike",
-                    severity="high",
-                    trigger_value=dispersion,
-                    note="Mag7 dispersion " + str(round(dispersion, 4)) + " exceeds threshold"
-                ))
-                self.last_trigger_by_type["dispersion_spike"] = datetime.now()
-
-        # Signal 2: Margin crowding
-        crowding = market_data.get("margin_concentration", 0.0)
-        if crowding > self.thresholds.get("crowding_threshold", 0.75):
-            if not self.is_cooldown_active("crowding_alert"):
-                signals.append(AnomalySignal(
-                    type="crowding_alert",
-                    severity="medium",
-                    trigger_value=crowding,
-                    note="Margin concentration " + str(round(crowding, 4)) + " crowding risk"
-                ))
-                self.last_trigger_by_type["crowding_alert"] = datetime.now()
-
-        # Signal 3: PMI surprise
-        pmi = market_data.get("pmi", {}).get("manufacturing", 50.0)
-        pmi_consensus = market_data.get("pmi_consensus", 50.0)
-        pmi_gap = abs(pmi - pmi_consensus)
-        if pmi_gap > self.thresholds.get("pmi_gap_threshold", 0.5):
-            if not self.is_cooldown_active("pmi_surprise"):
-                signals.append(AnomalySignal(
-                    type="pmi_surprise",
-                    severity="high" if pmi_gap > 1.0 else "medium",
-                    trigger_value=pmi_gap,
-                    note="PMI actual " + str(pmi) + " vs consensus " + str(pmi_consensus) + " gap " + str(round(pmi_gap, 2))
-                ))
-                self.last_trigger_by_type["pmi_surprise"] = datetime.now()
-
-        # Signal 4: VIX spike
+        # Signal 1: VIX spike
         vix = market_data.get("vix", 16.0)
         vix_change = market_data.get("vix_change", 0.0)
         if abs(vix_change) > self.thresholds.get("vix_spike_threshold", 5.0):
@@ -92,7 +54,7 @@ class AnomalyTrigger:
                 ))
                 self.last_trigger_by_type["vix_spike"] = datetime.now()
 
-        # Signal 5: A 股龙头离散度(沪深 300 前 10 当日涨跌幅 std)
+        # Signal 2: A 股龙头离散度(沪深 300 前 10 当日涨跌幅 std)
         a_dispersion = market_data.get("a_dispersion", 0.0)
         if a_dispersion > self.thresholds.get("a_dispersion_threshold", 0.03):
             if not self.is_cooldown_active("a_dispersion_spike"):
@@ -104,7 +66,7 @@ class AnomalyTrigger:
                 ))
                 self.last_trigger_by_type["a_dispersion_spike"] = datetime.now()
 
-        # Signal 6: HK 科技龙头离散度
+        # Signal 3: HK 科技龙头离散度
         hk_dispersion = market_data.get("hk_dispersion", 0.0)
         if hk_dispersion > self.thresholds.get("hk_dispersion_threshold", 0.03):
             if not self.is_cooldown_active("hk_dispersion_spike"):
@@ -116,7 +78,7 @@ class AnomalyTrigger:
                 ))
                 self.last_trigger_by_type["hk_dispersion_spike"] = datetime.now()
 
-        # Signal 7: A 股市场广度极端(涨停/跌停股数 或 涨家占比极端)
+        # Signal 4: A 股市场广度极端(涨停/跌停股数 或 涨家占比极端)
         breadth = market_data.get("a_breadth") or {}
         zt = int(breadth.get("zt_count", 0) or 0)
         dt = int(breadth.get("dt_count", 0) or 0)

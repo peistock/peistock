@@ -148,12 +148,13 @@ def _detect_signals_for_day(indicators: List[Dict], idx: int) -> Dict:
     return sig
 
 
-def _find_similar_day(indicators: List[Dict]) -> Optional[Tuple[int, float]]:
+def _find_similar_day(indicators: List[Dict], min_lookback: int = 10) -> Optional[Tuple[int, float]]:
     """
     用最新日的 CRI 分位 + 成本偏离分位，找历史上最接近的日期。
+    排除最近 min_lookback 个交易日（太近的匹配持有期未结束，无统计意义）。
     返回 (index, distance)，未找到返回 None。
     """
-    if len(indicators) < 2:
+    if len(indicators) < min_lookback + 2:
         return None
 
     latest = indicators[-1]
@@ -166,8 +167,9 @@ def _find_similar_day(indicators: List[Dict]) -> Optional[Tuple[int, float]]:
     best_idx = None
     best_dist = float("inf")
 
-    # 遍历历史（排除最新一日）
-    for i in range(len(indicators) - 1):
+    # 遍历历史，排除最近 min_lookback 个交易日
+    search_end = len(indicators) - min_lookback
+    for i in range(search_end):
         ind = indicators[i]
         cri = ind.get("cri_percentile")
         cost = ind.get("cost_deviation_percentile")

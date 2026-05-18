@@ -256,7 +256,7 @@ Bull/Bear 辩论除了拿到指标数字，还会拿到**最近 24h 的新闻原
 **搜索与分析**：
 - 搜索框支持中文名称 / 拼音缩写搜索（通过后端代理东方财富 suggest API）
 - AI 分析结果以卡片轮播展示，支持章节导航
-- 历史 AI 报告对比表格：日期为行，Bull/Bear/Preemption/Chair 为列
+- 历史 AI 报告对比表格：日期为行，Bull/Bear/Preemption/Sentiment/Chair 为列。移动端支持点击展开完整报告（Tooltip 在触屏设备上无 hover）
 
 **数据源**：
 - 东方财富 API（主）+ 腾讯财经 API（备）

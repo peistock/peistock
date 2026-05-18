@@ -11,8 +11,9 @@ import logging
 import threading
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ from dotenv import load_dotenv
 # LLM 配置来源：项目根目录 .env
 load_dotenv(ROOT / ".env", override=True)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="RROS API", version="1.0.0")
@@ -35,7 +36,37 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# ── Account auth ─────────────────────────────────────────────────────────────
+_ACCOUNTS: Dict[str, str] = {}
+_ACCOUNTS_FILE = ROOT / "config" / "accounts.json"
+
+def _load_accounts():
+    global _ACCOUNTS
+    if _ACCOUNTS_FILE.exists():
+        try:
+            _ACCOUNTS = json.loads(_ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _ACCOUNTS = {}
+    else:
+        _ACCOUNTS = {}
+
+_load_accounts()
+
+
+def require_account(
+    x_account: str = Header("", alias="X-Account"),
+    x_password: str = Header("", alias="X-Password"),
+) -> str:
+    """验证账号密码，返回账号名。AI 分析接口不需要，仅 watchlist 等个人数据使用。"""
+    if not x_account or not x_password:
+        raise HTTPException(status_code=401, detail="Missing X-Account or X-Password header")
+    expected = _ACCOUNTS.get(x_account)
+    if expected is None or expected != x_password:
+        raise HTTPException(status_code=401, detail="Invalid account or password")
+    return x_account
 
 _institute = None
 _institute_lock = threading.Lock()
@@ -208,6 +239,27 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
         except Exception as e:
             logger.warning(f"[{code}] 预期基准预取失败: {e}")
 
+        # 0d. 板块相对强弱背景（A 股）
+        sector_context = ""
+        if market == "a":
+            try:
+                from core.sector_context import get_sector_context
+                sector_context = get_sector_context(code)
+                if sector_context:
+                    logger.info(f"[{code}] 板块背景已预取: {sector_context}")
+            except Exception as e:
+                logger.warning(f"[{code}] 板块背景预取失败: {e}")
+
+        # 0e. 贵金属/有色金属宏观关联视角
+        metal_context = ""
+        try:
+            from core.metal_context import get_metal_context
+            metal_context = get_metal_context(code, "", stock_change_20d=0)
+            if metal_context:
+                logger.info(f"[{code}] 贵金属宏观视角已预取")
+        except Exception as e:
+            logger.warning(f"[{code}] 贵金属宏观视角预取失败: {e}")
+
         ctx = {
             "code": code,
             "signal": signal,
@@ -216,6 +268,8 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             "research_data_available": research_data_available,
             "financial_data": financial_data,
             "expectation_data": expectation_data,
+            "sector_context": sector_context,
+            "metal_context": metal_context,
         }
 
         with _jobs_lock:
@@ -315,6 +369,21 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             })
 
 
+def _find_recent_cache(code: str, days: int = 3) -> Optional[Tuple[str, Path]]:
+    """查找最近 N 天内是否有完整的分析报告缓存。
+    返回 (date_str, chair_debate_path) 或 None。
+    """
+    _slugs = ("bull", "bear", "preemption", "sentiment", "chair_debate")
+    today = datetime.now()
+    for i in range(days):
+        check_date = (today - timedelta(days=i)).strftime("%Y%m%d")
+        if all((ARCHIVE_DIR / f"{check_date}_{code}_{s}.md").exists() for s in _slugs):
+            chair_path = ARCHIVE_DIR / f"{check_date}_{code}_chair_debate.md"
+            if chair_path.exists():
+                return check_date, chair_path
+    return None
+
+
 def _cleanup_old_jobs():
     """清理 1 小时前已完成的旧任务，防止 _jobs 无限增长。"""
     cutoff = datetime.now().timestamp() - 3600
@@ -340,8 +409,46 @@ def analyze_stock(code: str, signal: str = "B"):
     _cleanup_old_jobs()
     date_str = datetime.now().strftime("%Y%m%d")
 
-    # 检查当天是否已有完整报告缓存（5 份报告全部存在才命中）
+    # 检查最近 3 天内是否已有完整报告（冷却期，避免频繁重复分析）
     _slugs = ("bull", "bear", "preemption", "sentiment", "chair_debate")
+    _cache_info = _find_recent_cache(code, days=3)
+    if _cache_info:
+        cache_date_str, cache_path = _cache_info
+        content = cache_path.read_text(encoding="utf-8")
+        card_path = ROOT / "data" / "stock_decisions" / f"{code}_{cache_date_str}.json"
+        card = {}
+        if card_path.exists():
+            try:
+                card = json.loads(card_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        task_id = f"cached_{code}_{cache_date_str}"
+        with _jobs_lock:
+            _jobs[task_id] = {
+                "code": code,
+                "signal": signal,
+                "status": "completed",
+                "progress": f"{cache_date_str} 已分析，3 日内直接展示缓存",
+                "created_at": datetime.now().isoformat(),
+                "result": {
+                    "code": code,
+                    "date": cache_date_str,
+                    "status": "completed",
+                    "report_path": str(cache_path),
+                    "report_preview": content[:8000],
+                    "conviction": card.get("conviction", 0),
+                    "decision": card.get("decision", "unknown"),
+                },
+            }
+        logger.info(f"[{code}] 3 日内缓存命中 ({cache_date_str})，直接返回: {task_id}")
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "progress": f"{cache_date_str} 已分析，3 日内直接展示缓存",
+            "result": _jobs[task_id]["result"],
+        }
+
+    # 检查当天是否已有完整报告缓存（兜底）
     _all_exist = all((ARCHIVE_DIR / f"{date_str}_{code}_{s}.md").exists() for s in _slugs)
     cache_path = ARCHIVE_DIR / f"{date_str}_{code}_chair_debate.md"
     if _all_exist and cache_path.exists():
@@ -741,6 +848,36 @@ def backtest_signals(code: str):
         return {"status": "ok", "code": code, "data": result}
     except Exception as e:
         logger.error(f"[backtest/signals/{code}] 失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+# ── Watchlist (per-account, cross-device sync) ──────────────────────────────
+
+@app.get("/api/watchlist")
+def get_watchlist_endpoint(account: str = Depends(require_account)):
+    """获取当前账号的股票池和分类列表。"""
+    try:
+        from core.watchlist_store import get_watchlist
+        return {"status": "ok", **get_watchlist(account)}
+    except Exception as e:
+        logger.error(f"[watchlist/get] 失败: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/watchlist")
+def set_watchlist_endpoint(
+    payload: Dict[str, Any],
+    account: str = Depends(require_account),
+):
+    """保存当前账号的股票池和分类列表。"""
+    try:
+        from core.watchlist_store import set_watchlist
+        stocks = payload.get("stocks", [])
+        categories = payload.get("categories", [])
+        set_watchlist(account, stocks, categories)
+        return {"status": "ok", "saved": True}
+    except Exception as e:
+        logger.error(f"[watchlist/set] 失败: {e}")
         return {"status": "error", "message": str(e)}
 
 

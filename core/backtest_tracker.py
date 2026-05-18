@@ -386,3 +386,48 @@ def format_stock_stats_for_prompt(code: str) -> str:
     lines.append("Chair 裁决时应参考以上历史表现："
                  "如果该股票历史上同类决策胜率显著低于 50%，应降低 conviction 或趋于保守。")
     return "\n".join(lines)
+
+
+def format_recent_decisions_for_prompt(code: str, limit: int = 3) -> str:
+    """
+    返回该股票最近 N 次已验证决策的逐条记录表格，可直接注入 Chair/Bull/Bear prompt。
+    只包含有 actual_pnl 的已完结决策。
+    """
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT decision_date, decision, conviction, actual_pnl, hit_kill_switch, holding_days
+           FROM validated_decisions
+           WHERE code=? AND actual_pnl IS NOT NULL
+           ORDER BY decision_date DESC
+           LIMIT ?""",
+        (code, limit)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return ""
+
+    lines = [
+        f"【该股票历史决策记录（最近{len(rows)}次）】",
+        "",
+        "| 决策日期 | 方向 | 置信度 | 实际盈亏 | 止损触发 |",
+        "|----------|------|--------|----------|----------|",
+    ]
+    for r in rows:
+        pnl_str = f"{r['actual_pnl']:+.2f}%" if r['actual_pnl'] is not None else "N/A"
+        hit_str = "是" if r['hit_kill_switch'] else "否"
+        lines.append(
+            f"| {r['decision_date']} | {r['decision'].upper()} | {int(r['conviction'] or 0)} | {pnl_str} | {hit_str} |"
+        )
+
+    # 附加预警：最近一次是否止损
+    if rows and rows[0]['hit_kill_switch']:
+        lines.append("")
+        lines.append(
+            f"⚠️ 最近一次决策（{rows[0]['decision_date']} {rows[0]['decision'].upper()}）触发止损离场，"
+            f"实际盈亏 {rows[0]['actual_pnl']:+.2f}%。若当前再次给出同方向信号，请评估是否存在重复失败风险。"
+        )
+
+    lines.append("")
+    lines.append("请结合上述历史记录评估本次决策：如果历史上同类方向决策连续亏损，应降低信心或趋于保守。")
+    return "\n".join(lines)

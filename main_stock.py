@@ -152,14 +152,48 @@ def run(code: str) -> int:
     if _check_mock_block_stock(dl, code, all_news):
         return 10
 
+    # 获取板块背景（A 股）
+    sector_context = ""
+    if market == "a":
+        try:
+            from core.sector_context import get_sector_context
+            sector_context = get_sector_context(code)
+            if sector_context:
+                print("  - sector context: " + sector_context)
+        except Exception as e:
+            print("  - sector context failed: " + str(e))
+
+    # 获取历史决策记录（回测闭环）
+    history_context = ""
+    try:
+        from core.backtest_tracker import format_recent_decisions_for_prompt
+        history_context = format_recent_decisions_for_prompt(code, limit=3)
+        if history_context:
+            print("  - history context: " + history_context.split("\n")[0])
+    except Exception as e:
+        print("  - history context failed: " + str(e))
+
+    # 获取贵金属/有色金属宏观关联视角
+    metal_context = ""
+    try:
+        from core.metal_context import get_metal_context
+        # 从 quote 中获取行业信息（如果可用），否则用空字符串让内部判断
+        industry = quote.get("industry", "")
+        stock_change = quote.get("change_pct", 0)
+        metal_context = get_metal_context(code, industry, stock_change_20d=stock_change)
+        if metal_context:
+            print("  - metal context: " + metal_context.split("\n")[0])
+    except Exception as e:
+        print("  - metal context failed: " + str(e))
+
     print()
     print("[5/6] Bull vs Bear debate...")
     llm = _init_llm()
     if llm is not None:
         print("  - LLM model: " + str(getattr(llm, "model_daily", "unknown")))
     analyst = BullBearAnalyst(config, llm=llm)
-    bull = analyst.analyze_stock("bull", code, quote, latest, signal_result, news=all_news, research_report=rr_data)
-    bear = analyst.analyze_stock("bear", code, quote, latest, signal_result, news=all_news, research_report=rr_data)
+    bull = analyst.analyze_stock("bull", code, quote, latest, signal_result, news=all_news, research_report=rr_data, sector_context=sector_context, history_context=history_context, metal_context=metal_context)
+    bear = analyst.analyze_stock("bear", code, quote, latest, signal_result, news=all_news, research_report=rr_data, sector_context=sector_context, history_context=history_context, metal_context=metal_context)
     print("  Bull: " + bull.stance + " | confidence=" + str(bull.confidence))
     print("  Bear: " + bear.stance + " | confidence=" + str(bear.confidence))
 

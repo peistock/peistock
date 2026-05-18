@@ -51,7 +51,7 @@ nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > logs/api.log
 | 入口 | 用途 | LLM | 写盘 | 退出码 |
 |---|---|---|---|---|
 | `main.py` | 市场级日跑 | ✓ | `data/decision.json` + memory.db | 0=正常, 10=mock 数据拒绝生成 |
-| `main_stock.py <code>` | 个股 CLI(Bull/Bear/Preemption/Chair) | ✓ | `data/stock_decisions/<code>_<YYYYMMDD>.json` | 0=正常, 10=mock 数据拒绝生成 |
+| `main_stock.py <code>` | 个股 CLI(Bull/Bear/Preemption/Sentiment/Chair) | ✓ | `data/stock_decisions/<code>_<YYYYMMDD>.json` | 0=正常, 10=mock 数据拒绝生成 |
 | `api_server.py` | FastAPI(端口 8000,供 peistock 前端调用) | ✓ | `data/archives/<date>_<code>_<slug>.md` | N/A(HTTP 状态码) |
 | `main_backtest.py` | 历史回测 | ✗ | `data/backtest_report.json` | 0 |
 | `panel.py` | Gradio 面板(端口 7862) | 间接(subprocess) | 同上 | 0 |
@@ -149,7 +149,7 @@ print('ResearchInstitute OK, roles:', list(inst.roles.keys()))
 
 - **本机代理(`scutil --proxy` 显示 `127.0.0.1:17890`)对国内 akshare 域名是死路**:`push2.eastmoney.com` / `www.cls.cn` 走代理会被远端断连。修法是在代理软件(Clash/V2Ray)里把 `*.eastmoney.com` / `*.cls.cn` / `*.sse.com.cn` / `*.szse.cn` 加直连规则,或临时 `export NO_PROXY="*"` 让 akshare 全部直连(但代理软件得尊重 NO_PROXY)。代理没修通时所有 akshare 调用走 mock,流程不会断但数据是假的(`get_stock_quote('600989')['name']` 会返回 `MOCK-600989`,`fetch_stock_news` 返回 mock 占位),要识别。**mock 数据会触发拒绝机制 → 决策卡不会生成,防止错误投资**
 - **Mock 数据陷阱（数据质量红线）**:`DataLayer.get_stock_history()` 在 akshare 失败时会回退到 `_mock_stock_history()`，生成合成随机数据。mock 数据的 MAHS/EMAHS/CRI 与真实数据可能偏差 30%+，曾导致 AI 报告出现"Bull 用 MAHS=32.48 而实际=24.16"的自相矛盾。修复方式：orchestrator 的 `_fetch_tencent_indicators` 直连腾讯 API（`web.ifzq.gtimg.cn`）获取真实 K 线，本地 Python 指标引擎计算，完全绕过 akshare/mock 路径
-- **HK 个股流通股 akshare 不稳**:`core/data_layer.py:HK_CAPITAL_OVERRIDES` 硬编码了 HSI 主要龙头,未收录的票走 5e9 兜底(明显偏离实际)。新加 HK 票之前先看这张表
+- **HK 个股流通股 akshare 不稳**:`core/data_layer.py:HK_CAPITAL_OVERRIDES` 硬编码了 HSI 主要龙头,未收录的票走 5e9 兜底(明显偏离实际)。新加 HK 票之前先看这张表。**signal_backtest.py 已绕过 DataLayer**，直接从腾讯 API `qt[70]`（港股）/`qt[72]`（A股）提取流通股本，与前端口径一致
 - **HK 流通股索引（腾讯 API）**:港股 qt 数组中，**流通股本在索引 70**（`qt[70]`），索引 69 是总股本。曾误用 69 导致 DD 值计算为 500（应为 ~80）。A 股流通股本在索引 72（`qt[72]`）。orchestrator 的 `_fetch_tencent_indicators` 已正确区分
 - **腾讯 API 返回字段类型**:`qt[70]` / `qt[72]` 返回的是带小数点的字符串（如 `'95912.000'`），Python `int()` 会报错。必须用 `int(float(qt[70]))`。同理 K 线成交量 `item[5]` 也可能带小数点
 - **`main.py` 的 `quiet_hours`(22-7)默认开**:晚上跑会 silent 退出,看不到日志。手动测时在 `config/rebel.yaml` 临时设 `quiet_hours: []`,测完恢复

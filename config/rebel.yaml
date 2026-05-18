@@ -4,9 +4,6 @@ system:
   lang: "zh"
 
 triggers:
-  dispersion_threshold: 0.35
-  crowding_threshold: 0.75
-  pmi_gap_threshold: 0.5
   vix_spike_threshold: 5.0
   return_dispersion_threshold: 3.0
   cooldown_hours: 4
