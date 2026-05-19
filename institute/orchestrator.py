@@ -487,6 +487,18 @@ class ResearchInstitute:
                 logger.info(f"[{slug}] 预注入贵金属宏观视角: {code}")
                 messages.append(AgentMessage.user(metal_ctx))
 
+            # 宏观-行业联动分析注入（macro_industry 角色专用）
+            if slug == "macro_industry":
+                mi_ctx = context.get("macro_industry_context") if context else None
+                if mi_ctx:
+                    logger.info(f"[{slug}] 预注入宏观-行业联动数据: {code}")
+                    messages.append(AgentMessage.user(
+                        f"【宏观-行业预计算数据】\n{mi_ctx}\n\n"
+                        f"**重要指令**：以上数据已经过量化计算，包含明确的综合评分、宏观得分、行业得分和置信度。"
+                        f"你的任务不是重新计算这些数字，而是基于它们给出定性解读和明确建议。"
+                        f'输出时必须保留"评分与置信度"章节，直接引用上述预计算数字，不要省略。'
+                    ))
+
             # Sentiment 角色额外注入融资融券/北向资金/龙虎榜结构化数据
             # Chair 也需要直接读取原始情绪数据，避免三手信息失真
             if slug in ("sentiment", "chair_debate"):

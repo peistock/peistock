@@ -98,7 +98,8 @@ rebel_research/
 ├── panel.py                 Gradio 面板（SSE 流式输出 / 决策卡 / 记忆 / 回测 / 快照 / 个股）
 ├── deploy.sh                一键部署到 JD Cloud
 ├── config/
-│   └── rebel.yaml           配置：阈值、衰减率、分析师提示词
+│   ├── rebel.yaml           配置：阈值、衰减率、分析师提示词
+│   └── accounts.json        静态账号配置（account: password）
 ├── core/
 │   ├── data_layer.py        真实数据层（AKShare A/HK + yfinance + mock fallback + mock 追踪）
 │   ├── anomaly_trigger.py   异常检测 + 类型级 cooldown（7 类信号）
@@ -113,7 +114,12 @@ rebel_research/
 │   ├── research_report.py   东方财富研报抓取与摘要
 │   ├── financial_data.py    季度财报数据获取（akshare 业绩报表）
 │   ├── backtest.py          历史回测引擎
-│   └── signal_backtest.py   信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期对比
+│   ├── signal_backtest.py   信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期对比
+│   ├── watchlist_store.py   按账号隔离的股票池 JSON 存储（新账号继承默认配置）
+│   ├── sector_context.py    行业分析师（贵金属/煤炭/电力等周期行业）
+│   ├── metal_context.py     贵金属专项上下文（金价/铜价/美联储利率）
+│   ├── financial_data.py    季度财报数据获取与预注入
+│   └── preemption_scorer.py 跨财报窗口真空期定价分析
 ├── institute/
 │   ├── orchestrator.py      ResearchInstitute：YAML 角色加载 + 依赖注入 + 研报缓存
 │   ├── vector_store.py      向量存储封装
@@ -147,7 +153,9 @@ rebel_research/
 │   ├── decision.json        最新市场级决策卡
 │   ├── stock_decisions/     个股决策卡（<code>_<YYYYMMDD>.json）
 │   ├── archives/            角色研报存档（<date>_<code>_<slug>.md）
-│   └── backtest_report.json 回测报告
+│   ├── backtest_report.json 回测报告
+│   ├── watchlists.json      各账号股票池（account → {stocks, categories}）
+│   └── default_watchlist.json  154 只默认股票（新账号自动继承）
 └── requirements.txt
 ```
 
@@ -197,9 +205,8 @@ rebel_research/
   - Preemption < 30 → 强制 NEUTRAL（信息已被消化）
   - Sentiment 极度贪婪 + 机构流出 → 禁止 LONG，条件允许则 SHORT
   - Sentiment 极度恐慌 + 机构流入 → 禁止 SHORT，条件允许则 LONG
-  - Bull >70 且 Bear <30 且 Preemption >40 且未触发情绪否决 → LONG
-  - Bear >70 且 Bull <30 且 Preemption >40 且未触发情绪否决 → SHORT
-  - 其他 → NEUTRAL
+  - 加权评分：Bull×0.35 + Preemption×0.35 − Bear×0.30
+  - 加权得分 >20 且未触发情绪过滤 → LONG；<−20 且未触发过滤 → SHORT；其他 → NEUTRAL
 
 ### 增量市场信息（news_fetcher）
 
@@ -247,7 +254,8 @@ Bull/Bear 辩论除了拿到指标数字，还会拿到**最近 24h 的新闻原
 ### 前端功能（peistock 仓库）
 
 **股票池管理**：
-- localStorage 持久化，支持增删改
+- 登录状态下前后端同步：`GET /api/watchlist` 拉取账号股票池覆盖 localStorage，用户操作后先写 localStorage 再 fire-and-forget 同步到后端。未登录走纯 localStorage 模式
+- 新账号自动继承 `data/default_watchlist.json`（154 只默认股票）
 - 按行业分类 tab 展示，支持自定义分类
 - 添加股票时输入名称/拼音自动解析代码
 - star 标记（替代旧收藏系统）
@@ -256,6 +264,7 @@ Bull/Bear 辩论除了拿到指标数字，还会拿到**最近 24h 的新闻原
 **搜索与分析**：
 - 搜索框支持中文名称 / 拼音缩写搜索（通过后端代理东方财富 suggest API）
 - AI 分析结果以卡片轮播展示，支持章节导航
+- **3 天 AI 分析冷却**：同一股票 3 天内已有 Chair 报告缓存则直接返回，不重复调用 LLM，跨账号共享结果
 - 历史 AI 报告对比表格：日期为行，Bull/Bear/Preemption/Sentiment/Chair 为列。移动端支持点击展开完整报告（Tooltip 在触屏设备上无 hover）
 
 **数据源**：

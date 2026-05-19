@@ -142,9 +142,11 @@ node test-scripts/test_percentile.mjs
 | `/api/backtest/signals/:code` | GET | 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 |
 | `/api/backtest/summary` | GET | 全局回测统计（按置信度/Preemption 条件分组） |
 | `/api/backtest/stock/:code` | GET | 单股票回测统计和最近交易记录 |
+| `/api/watchlist` | GET | 获取当前账号股票池（需 `X-Account` + `X-Password` header） |
+| `/api/watchlist` | POST | 保存当前账号股票池（需认证 header） |
 | `/health` | GET | 健康检查 |
 
-供前端（peistock）调用，支持查询任意股票（不限股票池）。
+供前端（peistock）调用，支持查询任意股票（不限股票池）。**认证**：watchlist 端点需 `X-Account` 和 `X-Password` header，账号密码在 `config/accounts.json` 静态配置。其他端点公开访问。
 
 ## 部署信息
 

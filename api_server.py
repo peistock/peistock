@@ -260,6 +260,15 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
         except Exception as e:
             logger.warning(f"[{code}] 贵金属宏观视角预取失败: {e}")
 
+        # 0f. 宏观-行业联动分析
+        macro_industry_context = ""
+        try:
+            from core.macro_industry_analyst import generate_macro_industry_report
+            macro_industry_context = generate_macro_industry_report(code)
+            logger.info(f"[{code}] 宏观-行业联动报告已预取 ({len(macro_industry_context)} 字符)")
+        except Exception as e:
+            logger.warning(f"[{code}] 宏观-行业联动预取失败: {e}")
+
         ctx = {
             "code": code,
             "signal": signal,
@@ -270,20 +279,25 @@ def _run_analysis_task(task_id: str, code: str, signal: str, date_str: str):
             "expectation_data": expectation_data,
             "sector_context": sector_context,
             "metal_context": metal_context,
+            "macro_industry_context": macro_industry_context,
         }
 
         with _jobs_lock:
             _jobs[task_id]["status"] = "running"
-            _jobs[task_id]["progress"] = "Bull/Bear 并行分析中..."
+            _jobs[task_id]["progress"] = "Bull/Bear/宏观行业 并行分析中..."
 
-        # Phase 1: Bull / Bear 并行（reasoning_effort=None，按角色模型选择）
+        # Phase 1: Bull / Bear / macro_industry 并行（reasoning_effort=None，按角色模型选择）
         llm_bull = _LLMProxy(inst._get_llm_for_role(inst.roles["bull"]), None)
         llm_bear = _LLMProxy(inst._get_llm_for_role(inst.roles["bear"]), None)
+        llm_mi = _LLMProxy(inst._get_llm_for_role(inst.roles.get("macro_industry", inst.roles["bull"])), None)
         try:
             futures = {
                 _inner_pool.submit(inst.run_analyst, "bull", date_str, context=ctx, llm=llm_bull): "bull",
                 _inner_pool.submit(inst.run_analyst, "bear", date_str, context=ctx, llm=llm_bear): "bear",
             }
+            # macro_industry 角色存在才加入并行
+            if "macro_industry" in inst.roles:
+                futures[_inner_pool.submit(inst.run_analyst, "macro_industry", date_str, context=ctx, llm=llm_mi)] = "macro_industry"
             for fut in as_completed(futures):
                 role = futures[fut]
                 try:
