@@ -70,6 +70,10 @@ nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > logs/api.log
 | `GET /api/backtest/signals/{code}` | 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 |
 | `GET /api/backtest/summary` | 全局回测统计（按置信度/Preemption 条件分组） |
 | `GET /api/backtest/stock/{code}` | 单股票回测统计和最近交易记录 |
+| `GET /api/watchlist` | 获取当前账号的股票池（需 `X-Account` / `X-Password` header） |
+| `POST /api/watchlist` | 保存当前账号的股票池（需认证 header） |
+
+**账号认证**：`api_server.py` 读取 `config/accounts.json`（`{"account": "password"}` 格式），所有 watchlist 端点通过 `X-Account` + `X-Password` header 鉴权。未认证请求返回 401。账号相互隔离，各自的股票池存于 `data/watchlists.json`。|
 
 ## 不可触碰区
 
@@ -81,13 +85,15 @@ nohup .venv/bin/uvicorn api_server:app --host 0.0.0.0 --port 8000 > logs/api.log
 ## 架构约束
 
 - **数据层带 mock fallback + mock 追踪拒绝**:`core/data_layer.py` 所有外部数据方法都有 `_mock_*` 兜底,同时记录到 `self._mock_sources` set。`main.py` / `main_stock.py` 在生成决策卡前调用 `_check_mock_block()`,若检测到 mock 数据则打印警报横幅并以 exit code 10 拒绝生成,防止假数据导致错误投资决策。新增数据源时保留 mock fallback 模式,并确保 mock 路径调用 `self._mock_sources.add("source_name")`
-- **股票池 localStorage 持久化（浏览器端）**：`src/data/watchlist.ts` 保留硬编码 `DEFAULT_WATCHLIST` 作为首次访问的初始数据，后续读写走 `localStorage`（key: `rros_stock_pool`）。支持 CRUD：添加（名称/拼音自动解析代码）、删除、star 标记、分类切换。分类列表也持久化（key: `rros_stock_pool_categories`）。旧收藏 `peter_stock_favorites` 自动迁移到股票池并标记 star。
+- **股票池 localStorage + 后端同步**：`src/data/watchlist.ts` 保留硬编码 `DEFAULT_WATCHLIST` 作为首次访问的初始数据。登录状态下，前端先从后端 `GET /api/watchlist` 拉取账号股票池（覆盖 localStorage），用户操作后先写 localStorage（key: `rros_stock_pool`），再 fire-and-forget 同步到后端 `POST /api/watchlist`。未登录时仍走纯 localStorage 模式。后端 `core/watchlist_store.py` 按账号隔离存储于 `data/watchlists.json`，新账号自动继承 `data/default_watchlist.json`（154 只默认股票）。账号体系走 `config/accounts.json` 静态配置（`admin/admin`、`guest1/guest1`、`guest2/guest2`）。
 - **个股数据走腾讯 API 直连，不走本地 peistock API**:`institute/orchestrator.py` 的 `_fetch_peistock_data` 优先 HTTP 连本地 peistock API（开发环境），失败后回退到 `_fetch_tencent_indicators` 直连腾讯财经 API（`web.ifzq.gtimg.cn`）获取 K 线 + 实时行情，本地 Python 指标引擎计算。生产环境 JD Cloud 无本地 peistock API，全部走腾讯 API。此设计避免了 akshare /mock 数据导致 AI 报告指标值失真（曾出现 MAHS/EMAHS 30% 偏差、CRI 相差 18 倍的数据质量事故）
 - **`query_peistock` 工具已移除**:原 `query_peistock` 工具让 LLM 自行调用本地 API，但生产环境 Connection Refused 导致分析失败。现已从所有 `roles/*.yaml` 的 tools 列表移除。技术指标由 orchestrator 预注入 prompt，LLM 无需再调工具
 - **AgentLoop 框架已移除**:原 FamilyMind 的多轮对话框架（intent 分类、tool calling 循环、guardrail、todo store）对 RROS 单轮报告场景是纯粹 overhead。现所有角色统一走 `LLMClient.chat_messages()` 单轮调用，`institute/mind/` 从 16 个文件精简到 2 个（`llm_client.py` + `agent_message.py`）
 - **信号级回测看板**:新增 `core/signal_backtest.py`，直连腾讯 API 获取 500 天 K 线，本地 Python 指标引擎逐日检测 B/S 信号，计算每个信号的持有期统计（最大收益、最大回撤、至今收益）。同时用当前 CRI + 成本偏离分位的欧氏距离匹配历史最接近日期做对比回测。前端 `SignalBacktestPanel.tsx` 展示。信号检测逻辑与前端 K 线图严格对齐（底背离只标连续段最后一天、顶背离只标第一天、做空 S 信号逻辑）
 - **季度财报数据预注入**:新增 `core/financial_data.py`，通过 akshare `stock_yjbb_em` 拉取最新季度财报（营收、净利润、同比/环比增速、毛利率、ROE），以 Markdown 格式注入 Bull/Bear/Preemption/Chair 的 prompt。LLM 严禁基于趋势推演猜测财报数据，必须使用已披露的实际数字
 - **个股决策卡先不入 memory.db**:`generate_stock_card` 只写文件,不持久化到衰减记忆。原因:个股卡和市场卡的 `claim_type` 体系还没统一,先存盘观察
+- **3 天 AI 分析冷却**：`api_server.py` 的 `analyze_stock` 在提交任务前调用 `_find_recent_cache(code, days=3)`，检查 `data/archives/` 中是否存在 3 天内同一股票的 Chair 报告缓存。若存在，直接返回缓存中的 conviction/decision/report_preview，不创建新 LLM 任务。避免同一股票在短时间内被重复分析，降低 API 成本。
+- **AI 分析结果跨账号共享**：分析缓存和决策卡 `data/stock_decisions/` 按 `code_date` 存储，不隔离账号。任何账号查询某股的 AI 分析，如果 3 天内已有缓存，所有账号共享同一份结果。
 - **api_server 决策卡解析**:Chair 报告生成后，`_generate_stock_decision_card` 从 Markdown 内容正则提取 decision/conviction/thesis/kill_switch 等字段，写入 `data/stock_decisions/<code>_<date>.json`，供 `recent_decisions` 和前端历史报告接口使用
 - **市场 anomaly 走 `AnomalySignal` dataclass**:新增触发器在 `core/anomaly_trigger.py` 加分支,严重程度走 `severity = "high"|"medium"`,cooldown 走 `last_trigger_by_type` 字典
 - **个股级走四步链，Bull/Bear 并行 + Preemption/Sentiment 并行**:Bull 和 Bear 无相互依赖，通过 `_inner_pool` 并行执行；Preemption 和 Sentiment 均依赖 Bull+Bear 报告，并行执行；Chair 依赖四者，串行。总耗时 ~3-4min。`_LLMProxy` 为每个任务临时覆盖 `reasoning_effort`，避免 `_bg_pool` 多线程共享 LLM 单例导致配置互相覆盖
@@ -152,6 +158,7 @@ print('ResearchInstitute OK, roles:', list(inst.roles.keys()))
 - **HK 个股流通股 akshare 不稳**:`core/data_layer.py:HK_CAPITAL_OVERRIDES` 硬编码了 HSI 主要龙头,未收录的票走 5e9 兜底(明显偏离实际)。新加 HK 票之前先看这张表。**signal_backtest.py 已绕过 DataLayer**，直接从腾讯 API `qt[70]`（港股）/`qt[72]`（A股）提取流通股本，与前端口径一致
 - **HK 流通股索引（腾讯 API）**:港股 qt 数组中，**流通股本在索引 70**（`qt[70]`），索引 69 是总股本。曾误用 69 导致 DD 值计算为 500（应为 ~80）。A 股流通股本在索引 72（`qt[72]`）。orchestrator 的 `_fetch_tencent_indicators` 已正确区分
 - **腾讯 API 返回字段类型**:`qt[70]` / `qt[72]` 返回的是带小数点的字符串（如 `'95912.000'`），Python `int()` 会报错。必须用 `int(float(qt[70]))`。同理 K 线成交量 `item[5]` 也可能带小数点
+- **腾讯 K-line high/low 映射**：腾讯 API 返回的日 K 线数组中，`item[3]` 是最高价（high），`item[4]` 是最低价（low），不是反过来。`core/signal_backtest.py` 和 `institute/orchestrator.py` 的 `_fetch_tencent_klines()` 已修正，前端 `tencentApi.ts` 也已修正。若 high/low 写反，会导致 Yang-Zhang 波动、成本偏离等指标计算失真。
 - **`main.py` 的 `quiet_hours`(22-7)默认开**:晚上跑会 silent 退出,看不到日志。手动测时在 `config/rebel.yaml` 临时设 `quiet_hours: []`,测完恢复
 - **akshare spot 表延迟 3-15 分钟**:`get_stock_quote` 不是真实时,面板会标 timestamp,别假装是 tick 级数据
 - **panel.py 长任务 SSE 心跳**:`subprocess.run` 会阻塞 20-40 秒,Gradio SSE 连接可能超时断开。已改用 `subprocess.Popen` 流式读取,每 0.3s yield 一次 log tail,保持连接活跃。改动 `panel.py` 的 `_stream_subprocess` 时注意保留 `PYTHONUNBUFFERED=1` 和 `bufsize=1`

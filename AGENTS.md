@@ -25,10 +25,11 @@
 - **趋势强度**: 5级分类 (strong_bull/bull/neutral/bear/strong_bear)
 
 #### 2. 股票池 (src/data/watchlist.ts + src/components/StockPool.tsx)
-- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化，后续支持增删改
+- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化。登录状态下优先从后端 `GET /api/watchlist` 拉取并覆盖 localStorage，用户操作后先写 localStorage 再 fire-and-forget 同步到后端 `POST /api/watchlist`。未登录走纯 localStorage 模式
 - **分类管理**: 分类列表也持久化（key: `rros_stock_pool_categories`），支持自定义添加/删除空分类
 - **StockPool 组件**: 支持按分类 tab 筛选、添加股票（名称/拼音自动解析代码）、删除、star 标记、inline 分类切换
 - **搜索集成**: 搜索框支持中文名称/拼音搜索，自动解析为股票代码
+- **认证模块**: `src/utils/auth.ts` 封装 `getAuth()` / `setAuth()` / `getAuthHeaders()`，登录状态存在 localStorage（key: `rros_auth`）。所有 `researchApi.ts` 请求自动携带认证 header
 
 #### 3. 信号系统
 
@@ -141,9 +142,11 @@ node test-scripts/test_percentile.mjs
 | `/api/backtest/signals/:code` | GET | 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 |
 | `/api/backtest/summary` | GET | 全局回测统计（按置信度/Preemption 条件分组） |
 | `/api/backtest/stock/:code` | GET | 单股票回测统计和最近交易记录 |
+| `/api/watchlist` | GET | 获取当前账号股票池（需 `X-Account` + `X-Password`） |
+| `/api/watchlist` | POST | 保存当前账号股票池（需认证 header） |
 | `/health` | GET | 健康检查 |
 
-供外部系统（如 family-mind）调用，支持查询任意股票（不限股票池）。
+供前端（peistock）调用，支持查询任意股票（不限股票池）。watchlist 端点需 `X-Account` 和 `X-Password` header 认证。
 
 ## 部署信息
 
