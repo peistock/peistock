@@ -8,6 +8,9 @@ HOST="root@36.151.144.153"
 REMOTE_DIR="/opt/rebel_research"
 LOCAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# 国内数据源直连（避免走代理被断连）
+export NO_PROXY="eastmoney.com,cls.cn,10jqka.com.cn,cninfo.com.cn,sse.com.cn,szse.com.cn"
+
 echo "==> 同步代码到 ${HOST}:${REMOTE_DIR}"
 rsync -avz \
   --exclude='.git' \

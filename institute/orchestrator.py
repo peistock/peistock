@@ -1,17 +1,12 @@
 """
 投研角色自动化编排系统（Research Institute）
 
-独立项目，依赖 FamilyMind 的 mind/ 模块作为外部库。
-运行前需确保 PYTHONPATH 包含 family-mind 目录。
-
 设计原则：
-- 不修改 FamilyMind 任何代码
-- 通过子类化覆盖需要定制的行为（如禁用 guardrail）
 - 角色纯 YAML 配置，不硬编码在 Python 中
+- 独立运行，不依赖外部项目
 """
 import os
 import re
-import sys
 import yaml
 import logging
 from pathlib import Path
@@ -19,16 +14,8 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# 把 FamilyMind 的 mind/ 加入 Python 路径
-_FAMILY_MIND_ROOT = Path.home() / "family-mind"
-if str(_FAMILY_MIND_ROOT) not in sys.path:
-    sys.path.insert(0, str(_FAMILY_MIND_ROOT))
-
-from mind.agent_loop import AgentLoop
-from mind.agent_message import AgentMessage
-from mind.llm_client import LLMClient
-from mind.tools import Toolkit
-from mind.todo_store import TodoStore
+from institute.mind.agent_message import AgentMessage
+from institute.mind.llm_client import LLMClient
 from .vector_store import get_vector_store
 from .topic_generator import TopicGenerator
 from .fact_check import fact_check_report, format_fact_check
@@ -41,40 +28,6 @@ ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 # 角色配置目录（统一：rebel_research/roles/）
 ROLES_DIR = Path(__file__).parent.parent / "roles"
-
-
-class ResearchAgentLoop(AgentLoop):
-    """投研专用 AgentLoop：禁用 guardrail，避免搜索后写报告被反复拦截"""
-
-    @staticmethod
-    def _guardrail_requires_tools(messages):
-        # 投研场景：分析师已主动调用搜索工具，guardrail 不再需要
-        return False
-
-    def _build_max_iter_reply(self) -> str:
-        """覆盖：迭代超限时返回专业话术，禁止输出'刚子AI分身'或'请回复继续'。"""
-        # 检查工作目录是否有写入的文件
-        files = []
-        try:
-            for p in self.work_dir.rglob("*"):
-                if p.is_file() and p.stat().st_size > 100:
-                    rel = p.relative_to(self.work_dir)
-                    files.append(f"- {rel}（{p.stat().st_size // 1024}KB）")
-        except Exception:
-            pass
-
-        if files:
-            file_list = "\n".join(files[:5])
-            return (
-                f"报告已输出至工作目录，但当前回复未包含完整内容。\n\n"
-                f"已生成文件：\n{file_list}\n\n"
-                f"请查阅上述文件获取完整分析。"
-            )
-
-        return (
-            "（分析迭代次数已达上限，但报告内容未正常输出。"
-            "请检查预注入数据是否充分，或联系技术排查。）"
-        )
 
 
 class AnalystRole:
@@ -114,14 +67,31 @@ class ResearchInstitute:
             if role.model and role.model != self.llm.model_daily:
                 alt_models.add(role.model)
 
+        # 模型环境变量别名映射：model_name -> 环境变量前缀
+        MODEL_ENV_ALIASES = {
+            "deepseek-v4-pro": "DEEPSEEK_PRO",
+        }
+
         alt_llms = {}
         for model_name in alt_models:
             env_key = model_name.upper().replace("-", "_").replace(".", "_")
-            base_url = os.getenv(f"ALT_MODEL_{env_key}_BASE_URL")
-            api_key = os.getenv(f"ALT_MODEL_{env_key}_API_KEY")
+            alias = MODEL_ENV_ALIASES.get(model_name)
+
+            # 优先尝试别名，再尝试自动生成的 env_key
+            base_url = None
+            api_key = None
+            used_prefix = None
+            for prefix in ([alias] if alias else []) + [f"ALT_MODEL_{env_key}"]:
+                base_url = os.getenv(f"{prefix}_BASE_URL")
+                api_key = os.getenv(f"{prefix}_API_KEY")
+                if base_url and api_key:
+                    used_prefix = prefix
+                    break
+
             if not base_url or not api_key:
                 logger.warning(f"角色配置了模型 '{model_name}'，但未找到对应环境变量 "
-                               f"(ALT_MODEL_{env_key}_BASE_URL / API_KEY)，将使用默认模型")
+                               f"({alias + '_BASE_URL / API_KEY' if alias else ''} "
+                               f"ALT_MODEL_{env_key}_BASE_URL / API_KEY)，将使用默认模型")
                 continue
             try:
                 # 绕过单例创建新实例
@@ -136,6 +106,8 @@ class ResearchInstitute:
                 client.model_daily = model_name
                 client.model_complex = model_name
                 client.model_summary = model_name
+                # 冻结备用配置：覆盖 _init 防止 chat_with_tools/chat 运行时重置回默认端点
+                client._init = lambda: None
                 alt_llms[model_name] = client
                 logger.info(f"备用模型客户端已创建: {model_name} @ {base_url}")
                 # 恢复单例
@@ -225,19 +197,15 @@ class ResearchInstitute:
             logger.warning(f"腾讯 API 回退也失败 {code}: {e}")
             return None
 
-    def _fetch_tencent_indicators(self, code: str) -> Optional[str]:
+    def _fetch_tencent_klines(self, code: str):
         """
-        直连腾讯财经 API 获取 K 线 + 实时行情，用 Python 指标引擎计算。
-        与前端 peistock 使用完全同源的数据，避免 akshare mock 失真。
+        直连腾讯财经 API 获取 K 线 + 实时行情。
+        返回 (records, name, price, prev_close, tencent_symbol)，供指标计算和真空期分析复用。
         """
         import urllib.request
         import json
-        from datetime import datetime
-        from core.indicators import calculate_all_indicators
-        from core.signal_detector import detect_signals, build_signal_input
 
-        clean = re.sub(r'[^0-9]', '', code)  # 提取纯数字
-        # 港股 5 位，A 股 6 位
+        clean = re.sub(r'[^0-9]', '', code)
         if len(clean) == 5:
             tencent_symbol = f"hk{clean}"
             market = "hk"
@@ -265,20 +233,19 @@ class ResearchInstitute:
         if not klines:
             raise ValueError("无 K 线数据")
 
-        # 解析 K 线 [日期, 开盘, 收盘, 最低, 最高, 成交量]
-        # A股主板/创业板=手(×100)，科创板=股，港股=股
         is_hk = tencent_symbol.startswith("hk")
         is_keb = clean.startswith("688")
 
         records = []
         for item in klines:
             vol = int(float(item[5])) if is_hk or is_keb else int(float(item[5])) * 100
+            # 腾讯 K 线字段顺序: [date, open, close, high, low, volume]
             records.append({
                 "date": str(item[0]),
                 "open": float(item[1]) if item[1] else 0,
                 "close": float(item[2]) if item[2] else 0,
-                "low": float(item[3]) if item[3] else 0,
-                "high": float(item[4]) if item[4] else 0,
+                "high": float(item[3]) if item[3] else 0,
+                "low": float(item[4]) if item[4] else 0,
                 "volume": vol,
                 "amount": 0.0,
             })
@@ -286,7 +253,7 @@ class ResearchInstitute:
         if len(records) < 60:
             raise ValueError(f"K 线数据不足: {len(records)} 条")
 
-        # 2. 获取实时行情（含流通股本）
+        # 2. 获取实时行情
         quote_url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,1,qfq"
         req2 = urllib.request.Request(quote_url, headers={
             "Accept": "application/json",
@@ -299,21 +266,51 @@ class ResearchInstitute:
         name = qt[1] or code
         price = float(qt[3]) if qt[3] else 0
         prev_close = float(qt[4]) if qt[4] else 0
+
+        return records, name, price, prev_close, tencent_symbol
+
+    def _fetch_tencent_indicators(self, code: str) -> Optional[str]:
+        """
+        直连腾讯财经 API 获取 K 线 + 实时行情，用 Python 指标引擎计算。
+        与前端 peistock 使用完全同源的数据，避免 akshare mock 失真。
+        """
+        from core.indicators import calculate_all_indicators
+        from core.signal_detector import detect_signals, build_signal_input
+
+        records, name, price, prev_close, tencent_symbol = self._fetch_tencent_klines(code)
+        market = "hk" if tencent_symbol.startswith("hk") else "a"
         change_pct = ((price - prev_close) / prev_close * 100) if prev_close > 0 else 0
 
         # 流通股本：港股 idx 70，A股 idx 72
+        clean = re.sub(r'[^0-9]', '', code)
+        import urllib.request
+        import json
+        quote_url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,1,qfq"
+        req2 = urllib.request.Request(quote_url, headers={
+            "Accept": "application/json",
+            "Referer": "https://stock.qq.com",
+        })
+        with urllib.request.urlopen(req2, timeout=10) as resp2:
+            quote_data = json.loads(resp2.read().decode("utf-8"))
+        qt = quote_data["data"][tencent_symbol]["qt"][tencent_symbol]
+
         capital = 0
         if market == "hk":
             capital = int(float(qt[70])) if len(qt) > 70 and qt[70] else 0
         else:
             capital = int(float(qt[72])) if len(qt) > 72 and qt[72] else 0
 
-        # 3. 本地 fallback 流通股本
         if capital <= 0:
             from core.data_layer import DataLayer
             capital = DataLayer().get_stock_capital(code)
 
-        # 4. 计算指标
+        # 计算 5 日涨幅
+        change_5d = 0
+        if len(records) >= 6:
+            price_5d_ago = records[-6]["close"]
+            change_5d = (price - price_5d_ago) / price_5d_ago * 100
+
+        # 计算指标
         indicators_list = calculate_all_indicators(records, capital, capital_unit="shares")
         if not indicators_list:
             raise ValueError("指标计算失败")
@@ -321,20 +318,18 @@ class ResearchInstitute:
         latest = indicators_list[-1]
         date_str = str(latest.get("date", ""))
 
-        # 5. 信号检测
         sig_input = build_signal_input(indicators_list)
         signals = detect_signals(sig_input)
         strict_sigs = signals.get("strict", [])
         sig_type = signals.get("signalType", "—")
 
-        # Python 指标引擎返回 snake_case 字段，兼容两种命名
         cri_pct = latest.get('cri_percentile', latest.get('criPercentile', 0))
         greedy_pct = latest.get('greedy_percentile', latest.get('greedyPercentile', 0))
         bias225_pct = latest.get('bias225_percentile', latest.get('bias225Percentile', 0))
         cost_pct = latest.get('cost_deviation_percentile', latest.get('costDeviationPercentile', 0))
         lines = [
             f"【peistock 技术指标 · {name} {code}】",
-            f"价格: {price:.2f}  涨跌: {change_pct:.2f}%  日期: {date_str}",
+            f"价格: {price:.2f}  涨跌: {change_pct:.2f}%  5日涨幅: {change_5d:+.2f}%  日期: {date_str}",
             "",
             "| 指标 | 值 | 分位 |",
             "|------|-----|------|",
@@ -349,6 +344,37 @@ class ResearchInstitute:
         ]
         logger.info(f"腾讯 API 指标计算成功: {code}")
         return "\n".join(lines)
+
+    def _calc_vacuum_period_change(self, code: str, announce_date: str) -> Optional[float]:
+        """
+        计算「上次财报公告日 → 今日」的涨跌幅（真空期涨跌幅）。
+        如果 announce_date 在 K 线数据中找不到，返回 None。
+        """
+        try:
+            records, name, price, prev_close, _ = self._fetch_tencent_klines(code)
+            if price <= 0 or not announce_date:
+                return None
+
+            # announce_date 格式通常是 YYYY-MM-DD，K 线日期是 YYYYMMDD 或 YYYY-MM-DD
+            target_date = announce_date.replace("-", "")
+
+            # 找公告日或之后第一个交易日的收盘价
+            entry_price = None
+            for r in records:
+                r_date = str(r["date"]).replace("-", "")
+                if r_date >= target_date:
+                    entry_price = r["close"]
+                    break
+
+            if entry_price is None or entry_price <= 0:
+                return None
+
+            change = (price - entry_price) / entry_price * 100
+            logger.info(f"[{code}] 真空期涨跌幅: {announce_date} → 今日, 入口价={entry_price:.2f}, 当前={price:.2f}, 变化={change:+.2f}%")
+            return change
+        except Exception as e:
+            logger.warning(f"[{code}] 真空期涨跌幅计算失败: {e}")
+            return None
 
     def _fetch_sentiment_data(self, code: str) -> Optional[str]:
         """
@@ -412,8 +438,15 @@ class ResearchInstitute:
 
     # ---------- 单角色执行 ----------
 
-    def run_analyst(self, slug: str, date_str: str = None, context: dict = None) -> Optional[Path]:
-        """执行单个分析师，返回报告文件路径"""
+    def run_analyst(self, slug: str, date_str: str = None, context: dict = None, llm=None) -> Optional[Path]:
+        """执行单个分析师，返回报告文件路径。
+
+        Args:
+            slug: 角色标识
+            date_str: 日期字符串
+            context: 上下文数据（股票代码、研报数据等）
+            llm: 可选，自定义 LLM 实例（用于线程安全地覆盖 reasoning_effort 等配置）
+        """
         # signal_monitor 是规则引擎，不走 AgentLoop
         if slug == "signal_monitor":
             return self._run_signal_monitor(date_str)
@@ -433,25 +466,32 @@ class ResearchInstitute:
             return report_path
 
         logger.info(f"[{slug}] 开始执行 {role.name}")
-
-        work_dir = ARCHIVE_DIR / ".tmp" / f"{date_str}{code_suffix}_{slug}"
-        work_dir.mkdir(parents=True, exist_ok=True)
-        toolkit = Toolkit(work_dir)
-        # 生产环境无本地 peistock API，屏蔽 query_peistock 避免 LLM 调用失败
-        toolkit._registry._tools.pop("query_peistock", None)
-        toolkit._registry._meta.pop("query_peistock", None)
-        # JD Cloud 服务器网络受限（GFW），禁用所有外网抓取工具，强制 LLM 使用 searxng_proxy 搜索
-        for _bad_tool in ("browse_open", "browse_click", "browse_fill",
-                           "browse_screenshot", "browse_scroll", "browse_text",
-                           "fetch_webpage", "jina_reader", "find_chrome_url"):
-            toolkit._registry._tools.pop(_bad_tool, None)
-            toolkit._registry._meta.pop(_bad_tool, None)
-        # 禁止 LLM 写文件/执行代码（必须直接在回复中输出完整报告）
-        for _no_write in ("write_file", "execute_code", "pip_install", "md_to_pdf"):
-            toolkit._registry._tools.pop(_no_write, None)
-            toolkit._registry._meta.pop(_no_write, None)
         today = datetime.now().strftime("%Y年%m月%d日")
         system_prompt = self._build_system_prompt(role, today, context=context)
+
+        # Chair 角色：将 Risk Manager 结果注入 system prompt 以增强可见性
+        if slug == "chair_debate" and context and context.get("risk_assessment"):
+            risk = context["risk_assessment"]
+            risk_addon = (
+                f"\n\n【风控约束（必须遵守）】\n"
+                f"Risk Manager 判定当前风险等级为 {risk['risk_level']}（总风险分 {risk['total_score']:.1f}/100）。\n"
+            )
+            if risk["risk_level"] == "HIGH":
+                risk_addon += (
+                    "你的 confidence 上限锁死 60 分，必须给出比平时更严格的止损位（收紧 30%），"
+                    "裁决理由第一段必须明确说明 'Risk Manager 判定 HIGH 风险，已调整仓位和止损'。\n"
+                )
+            elif risk["risk_level"] == "MEDIUM":
+                risk_addon += (
+                    "建议适当降低仓位至半仓水平，裁决理由中必须说明风险来源。\n"
+                )
+            else:
+                risk_addon += (
+                    "裁决理由第一段必须简要提及 'Risk Manager 判定 LOW 风险'，然后正常裁决。\n"
+                )
+            risk_addon += "无论风险等级高低，裁决理由中必须明确提及 Risk Manager 的判定结果（HIGH/MEDIUM/LOW），不能省略。\n"
+            system_prompt += risk_addon
+            logger.info(f"[{slug}] Risk Manager 已注入 system prompt: {risk['risk_level']}")
 
         # 自动议题生成：获取该角色当日热点议题
         try:
@@ -476,6 +516,30 @@ class ResearchInstitute:
                 logger.info(f"[{slug}] 预注入 peistock 数据: {code}")
                 messages.append(AgentMessage.user(peistock_data))
 
+            # 板块相对强弱背景注入（A 股）
+            sector_ctx = context.get("sector_context") if context else None
+            if sector_ctx:
+                logger.info(f"[{slug}] 预注入板块背景: {code}")
+                messages.append(AgentMessage.user(sector_ctx))
+
+            # 贵金属/有色金属宏观关联注入
+            metal_ctx = context.get("metal_context") if context else None
+            if metal_ctx:
+                logger.info(f"[{slug}] 预注入贵金属宏观视角: {code}")
+                messages.append(AgentMessage.user(metal_ctx))
+
+            # 宏观-行业联动分析注入（macro_industry 角色专用）
+            if slug == "macro_industry":
+                mi_ctx = context.get("macro_industry_context") if context else None
+                if mi_ctx:
+                    logger.info(f"[{slug}] 预注入宏观-行业联动数据: {code}")
+                    messages.append(AgentMessage.user(
+                        f"【宏观-行业预计算数据】\n{mi_ctx}\n\n"
+                        f"**重要指令**：以上数据已经过量化计算，包含明确的综合评分、宏观得分、行业得分和置信度。"
+                        f"你的任务不是重新计算这些数字，而是基于它们给出定性解读和明确建议。"
+                        f'输出时必须保留"评分与置信度"章节，直接引用上述预计算数字，不要省略。'
+                    ))
+
             # Sentiment 角色额外注入融资融券/北向资金/龙虎榜结构化数据
             # Chair 也需要直接读取原始情绪数据，避免三手信息失真
             if slug in ("sentiment", "chair_debate"):
@@ -486,18 +550,105 @@ class ResearchInstitute:
                 else:
                     logger.warning(f"[{slug}] 情绪行为数据不可用: {code}")
 
-            # 季度财报核心数据注入（所有角色都需要，禁止基于趋势推演猜测财报）
-            try:
-                from core.financial_data import get_quarterly_financial_for_prompt
-                market = "a" if len(code) == 6 and code.isdigit() else "hk"
-                fin_data = get_quarterly_financial_for_prompt(code, market=market)
-                if fin_data and "⚠️" not in fin_data:
-                    logger.info(f"[{slug}] 预注入季度财报数据: {code}")
-                    messages.append(AgentMessage.user(fin_data))
+            # 季度财报核心数据注入（优先从 context 读取 api_server 预取数据，避免重复调用 akshare）
+            fin_data = context.get("financial_data") if context else None
+            if not fin_data:
+                try:
+                    from core.financial_data import get_quarterly_financial_for_prompt
+                    market = context.get("market") if context else ("a" if len(code) == 6 and code.isdigit() else "hk")
+                    fin_data = get_quarterly_financial_for_prompt(code, market=market)
+                except Exception as e:
+                    logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+            if fin_data and "⚠️" not in fin_data:
+                logger.info(f"[{slug}] 预注入季度财报数据: {code} ({'context' if context and context.get('financial_data') else 'fallback'})")
+                messages.append(AgentMessage.user(fin_data))
+            else:
+                logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
+
+            # 预期基准数据注入（Preemption/Chair 需要，用于量化预期差；优先从 context 读取）
+            if slug in ("preemption", "chair_debate"):
+                exp_data = context.get("expectation_data") if context else None
+                if not exp_data:
+                    try:
+                        from core.financial_data import get_expectation_for_stock
+                        market = context.get("market") if context else ("a" if len(code) == 6 and code.isdigit() else "hk")
+                        exp_data = get_expectation_for_stock(code, market=market)
+                    except Exception as e:
+                        logger.warning(f"[{slug}] 预期基准数据获取失败: {e}")
+                if exp_data and "⚠️" not in exp_data:
+                    logger.info(f"[{slug}] 预注入预期基准数据: {code} ({'context' if context and context.get('expectation_data') else 'fallback'})")
+                    messages.append(AgentMessage.user(exp_data))
                 else:
-                    logger.warning(f"[{slug}] 季度财报数据不可用: {code}")
-            except Exception as e:
-                logger.warning(f"[{slug}] 季度财报数据获取失败: {e}")
+                    logger.warning(f"[{slug}] 预期基准数据不可用: {code}")
+
+            # Preemption 角色：公式化计算入场时机评分并注入
+            if slug == "preemption":
+                try:
+                    from core.preemption_scorer import build_preemption_score_from_prompt_data
+                    from core.financial_data import extract_announce_date
+                    # 提取 5 日涨幅（优先从预注入的 peistock 数据）
+                    price_change_5d = 0
+                    peistock_text = peistock_data or ""
+                    pm = re.search(r'5日涨幅:\s*([+-]?\d+\.?\d*)%', peistock_text)
+                    if pm:
+                        price_change_5d = float(pm.group(1))
+                    else:
+                        # fallback：尝试提取当日涨跌作为近似
+                        pm = re.search(r'涨跌:\s*([+-]?\d+\.?\d*)%', peistock_text)
+                        if pm:
+                            price_change_5d = float(pm.group(1))
+                    if context and context.get("price_change_5d"):
+                        price_change_5d = float(context.get("price_change_5d"))
+
+                    # 计算跨财报真空期涨跌幅（上次财报公告日 → 今日）
+                    price_change_vacuum = 0
+                    announce_date = extract_announce_date(fin_data or "")
+                    if announce_date:
+                        vacuum_change = self._calc_vacuum_period_change(code, announce_date)
+                        if vacuum_change is not None:
+                            price_change_vacuum = vacuum_change
+                            # 注入真空期数据供分析师参考
+                            vacuum_md = (
+                                f"【跨财报真空期价格数据 · {code}】\n\n"
+                                f"上次财报公告日: {announce_date}\n"
+                                f"从上次财报公告日至今涨跌幅: {price_change_vacuum:+.2f}%\n\n"
+                                f"此数据用于判断「真空期定价」：\n"
+                                f"- 如果上次财报后股价已大涨 30%+，说明市场可能已在交易「下次财报超预期」的预期\n"
+                                f"- 如果真空期股价几乎没涨甚至下跌，而实际财报显著超预期 → 存在真正的预期差\n"
+                                f"- 分析时必须结合此数据，不要只看最近 5 日涨幅"
+                            )
+                            messages.append(AgentMessage.user(vacuum_md))
+                            logger.info(f"[preemption] 注入真空期数据: {announce_date} → 今日 {price_change_vacuum:+.2f}%")
+
+                    score_result = build_preemption_score_from_prompt_data(
+                        financial_md=fin_data or "",
+                        expectation_md=exp_data or "",
+                        price_change_5d=price_change_5d,
+                        price_change_vacuum=price_change_vacuum,
+                    )
+                    if score_result:
+                        score_md = (
+                            f"【系统公式化 Preemption 评分 · {code}】\n\n"
+                            f"系统已基于量化公式自动计算入场时机评分，此评分独立于你的主观判断，"
+                            f"你的任务是解释这个评分并验证其合理性：\n\n"
+                            f"- **入场时机评分**: {score_result['score']}/100\n"
+                            f"  - 基本面偏离分: {score_result['fundamental']}/100\n"
+                            f"  - 综合价格消化度: {score_result['priced_in']}/100（越高表示股价已反应越多）\n"
+                            f"    - 短期消化度(5日): {score_result.get('priced_in_5d', 0)}/100\n"
+                            f"    - 真空期消化度(财报至今): {score_result.get('priced_in_vacuum', 0)}/100  ← 权重 70%\n"
+                            f"  - 营收偏离: {score_result['rev_diff']:+.2f}%\n"
+                            f"  - 净利润偏离: {score_result['profit_diff']:+.2f}%\n"
+                            f"  - 真空期涨跌幅: {score_result.get('price_change_vacuum', 0):+.2f}%\n"
+                            f"- **计算过程**: {score_result['details']}\n\n"
+                            f"评分含义：100=信息完全未被消化（最佳入场点）；0=已被完全消化（入场即接盘）。\n"
+                            f"你的输出中「预判结论」部分的「入场时机评分」**必须使用此系统评分 {score_result['score']} 分**，"
+                            f"不要自行打分。你的价值在于：基于 Bull/Bear 观点和股价证据，解释这个评分是否合理、"
+                            f"是否存在公式未捕捉到的额外信息（如突发政策、行业催化、技术面突破等）。"
+                        )
+                        messages.append(AgentMessage.user(score_md))
+                        logger.info(f"[preemption] 注入公式化评分: {score_result['score']} 分")
+                except Exception as e:
+                    logger.warning(f"[preemption] 公式评分计算失败: {e}")
 
             # 研报客观数据注入（Bull/Bear/Preemption/Chair 需要，已预取于 context）
             if slug in ("bull", "bear", "preemption", "chair_debate"):
@@ -505,6 +656,59 @@ class ResearchInstitute:
                 if rr_data:
                     logger.info(f"[{slug}] 预注入研报客观数据: {code} ({len(rr_data)} 字符)")
                     messages.append(AgentMessage.user(rr_data))
+
+            # Chair 裁决前注入该股票历史验证表现（回测闭环反馈）
+            if slug == "chair_debate":
+                try:
+                    from core.backtest_tracker import format_recent_decisions_for_prompt
+                    history_md = format_recent_decisions_for_prompt(code, limit=3)
+                    if history_md:
+                        logger.info(f"[chair] 注入历史决策记录: {code}")
+                        messages.append(AgentMessage.user(history_md))
+                except Exception as e:
+                    logger.warning(f"[chair] 历史决策记录注入失败: {e}")
+
+                # 注入 Risk Manager 风控评估结果（Phase 2.5）
+                risk_assessment = context.get("risk_assessment") if context else None
+                if risk_assessment:
+                    logger.info(f"[chair] 注入风控评估: {code} ({risk_assessment['risk_level']})")
+                    risk_md = (
+                        f"【风控评估结果（Risk Manager）】\n\n"
+                        f"- 风险等级: {risk_assessment['risk_level']}\n"
+                        f"- 总风险分: {risk_assessment['total_score']:.1f}/100\n"
+                        f"- 仓位限制: {risk_assessment['position_limit']}\n"
+                        f"- 子风险详情:\n"
+                        f"  - 共识风险 (Bull/Bear 分歧): {risk_assessment['sub_risks']['consensus_risk']:.1f}\n"
+                        f"  - 情绪极端风险: {risk_assessment['sub_risks']['sentiment_extreme_risk']:.1f}\n"
+                        f"  - 信息消化风险: {risk_assessment['sub_risks']['digestion_risk']:.1f}\n"
+                        f"  - 波动率风险: {risk_assessment['sub_risks']['volatility_risk']:.1f}\n\n"
+                    )
+                    if risk_assessment["risk_level"] == "HIGH":
+                        risk_md += (
+                            "**重要指令**：Risk Manager 判定当前为 HIGH 风险。你必须遵守以下约束：\n"
+                            "1. confidence 上限锁死 60 分，不得超过。\n"
+                            "2. 必须给出比平时更严格的止损位（例如收紧 30%）。\n"
+                            "3. 在裁决理由中明确说明 'Risk Manager 判定 HIGH 风险，已调整仓位和止损'。\n"
+                        )
+                    elif risk_assessment["risk_level"] == "MEDIUM":
+                        risk_md += (
+                            "**提示**：Risk Manager 判定当前为 MEDIUM 风险。建议适当降低仓位至半仓水平，"
+                            "并在裁决理由中说明风险来源。\n"
+                        )
+                    messages.append(AgentMessage.user(risk_md))
+
+                # 注入 Bull/Bear 辩论摘要（Phase 1.5）
+                debate_summary = context.get("debate_summary") if context else None
+                if debate_summary:
+                    logger.info(f"[chair] 注入辩论摘要: {code}")
+                    messages.append(AgentMessage.user(
+                        f"【Bull/Bear 对抗辩论摘要】\n\n"
+                        f"{debate_summary}\n\n"
+                        f"**重要指令**：以上摘要是 Bull 初稿、Bear 逐条反驳、Bull 逐条回应三轮交锋的浓缩。"
+                        f"你在裁决时必须参考这些信息：如果 Bull 的核心论据在回应中被 Bear 有效驳倒，应降低 Bull 置信度；"
+                        f"如果 Bull 成功回应了 Bear 的反驳，且核心论据仍然成立，应维持或提高 Bull 置信度。"
+                        f"辩论摘要只作为你裁决的**补充信息**，不替代你自己的独立判断。"
+                    ))
 
         # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:
@@ -530,41 +734,21 @@ class ResearchInstitute:
         # TODO: 向量库修复后恢复
         pass
 
-        llm_for_role = self._get_llm_for_role(role)
-        loop = ResearchAgentLoop(
-            llm=llm_for_role,
-            toolkit=toolkit,
-            todo_store=TodoStore(),
-            work_dir=work_dir,
-            event_sink=None,
-        )
+        llm_for_role = llm or self._get_llm_for_role(role)
 
         try:
-            result = loop.run(messages, max_iterations=12)
-            reply = result.get("reply", "")
+            reply = llm_for_role.chat_messages(
+                messages=[m.to_llm() for m in messages],
+                model=role.model,
+                max_tokens=role.max_tokens,
+                temperature=role.temperature,
+            )
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
-            # 兜底：强制替换 FamilyMind 人设污染关键词
-            contaminated = "刚子AI分身" in reply or "您回复" in reply or "联系爸爸" in reply
-            if contaminated:
-                reply = (
-                    "（报告生成过程中遇到迭代限制，原始输出被拦截。"
-                    "以下为基于已有数据的最佳努力输出。）\n\n"
-                    + reply.replace("刚子AI分身", "AI分析师")
-                    .replace("您回复「继续」，我接着干～", "")
-                    .replace("您回复『继续』，我就接着把剩下的做完！", "")
-                    .replace("请您稍后再试，或者联系爸爸帮忙看看。", "请稍后再试或联系技术支持。")
-                )
 
-            # Fallback：如果 reply 过短，尝试读取工作目录中 LLM 写入的文件
-            if len(reply.strip()) < 200:
-                written_files = list(work_dir.glob("*.md"))
-                if written_files:
-                    # 取最大的文件（最可能是完整报告）
-                    largest = max(written_files, key=lambda p: p.stat().st_size)
-                    if largest.stat().st_size > 500:
-                        logger.info(f"[{slug}] reply 过短，fallback 读取工作目录文件: {largest.name}")
-                        reply = largest.read_text(encoding="utf-8")
+            # JSON 输出角色：去除 JSON 前面的思考过程
+            if role.slug in ("bull", "bear"):
+                reply = self._strip_thinking_before_json(reply)
 
             report_content = self._format_report(role, today, reply)
 
@@ -584,7 +768,7 @@ class ResearchInstitute:
 
             # Fact-Check：事实核查
             try:
-                llm_for_check = self._get_llm_for_role(role)
+                llm_for_check = llm or self._get_llm_for_role(role)
                 fc_result = fact_check_report(report_content, llm_for_check, max_claims=6)
                 if fc_result.get("verified"):
                     fc_md = format_fact_check(fc_result)
@@ -747,7 +931,7 @@ class ResearchInstitute:
             "5. 不要输出任何 thinking、reasoning 或 thought 标签，直接输出最终报告",
             "6. 直接在最终回复中输出完整报告全文，不要调用 write_file 工具写入文件",
             "7. 禁止写代码、禁止创建文件、禁止执行脚本——所有分析必须在同一条回复中用自然语言完成",
-            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
+            "8. 如果搜索工具不可用或返回结果为空，不要反复尝试，立即基于已有数据（预注入的技术指标、新闻、研报）输出完整报告。严禁在报告中提及「搜索不可用」「搜索失败」「无法获取最新消息」等任何关于工具失败的描述——读者不需要知道工具是否工作，只需要看到完整的分析结论。绝不允许输出'还没做完'、'需要更多时间'等未完成话术——你的任务就是输出完整报告，不是请求用户继续。",
         ])
         if role.tools:
             lines.append(f"9. 你可以使用的工具: {', '.join(role.tools)}")
@@ -790,6 +974,23 @@ class ResearchInstitute:
             lines.append("")
             lines.append("你可以选择围绕上述议题展开分析，也可以根据最新搜索结果自行判断今日最重要的研究方向。")
 
+        # 注入辩论相关上下文（Phase 1.5）
+        if role.slug == "bear_rebuttal" and context and context.get("bull_report"):
+            lines.append("")
+            lines.append("【多头分析师（Bull）初稿报告】")
+            lines.append("请仔细阅读以下 Bull 初稿，然后逐条给出你的反驳：")
+            lines.append("---")
+            lines.append(context.get("bull_report"))
+            lines.append("---")
+
+        if role.slug == "bull_response" and context and context.get("bear_rebuttal_report"):
+            lines.append("")
+            lines.append("【空头反驳员（Bear Rebuttal）的反驳报告】")
+            lines.append("请仔细阅读以下 Bear 的反驳，然后逐条给出你的回应：")
+            lines.append("---")
+            lines.append(context.get("bear_rebuttal_report"))
+            lines.append("---")
+
         lines.extend([
             "",
             "重要：",
@@ -827,6 +1028,33 @@ class ResearchInstitute:
         # 清理多余空行
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+
+    def _strip_thinking_before_json(self, text: str) -> str:
+        """对于强制 JSON 输出的角色，去除 JSON 对象前面的思考过程。
+        deepseek-v4-flash 等模型经常在 JSON 前输出中文思考过程（如'好的，用户让我...'），
+        这些内容是模型内部推理，不应写入最终报告。
+        """
+        import re
+        json_start = text.find("{")
+        if json_start <= 0:
+            return text
+        prefix = text[:json_start].strip()
+        if len(prefix) < 30:
+            return text
+        # 常见思考过程标志词
+        thinking_markers = [
+            "好的，", "首先，", "我需要", "让我", "我注意到",
+            "用户让我", "我已完成", "让我开始", "我来分析",
+            "我需要构建", "关于", "从预注入", "从用户",
+            "我需要仔细", "我需要基于", "让我仔细", "我需要构建",
+            "输出格式要求", "最终JSON", "最终输出", "直接输出",
+        ]
+        if any(m in prefix for m in thinking_markers):
+            candidate = text[json_start:]
+            # 验证确实是 JSON 输出角色常见的字段
+            if '"signal"' in candidate or '"confidence"' in candidate:
+                return candidate
+        return text
 
     def _extract_thesis_and_confidence(self, report_content: str) -> tuple:
         """从 Bull/Bear 报告中提取核心论点 (thesis) 和置信度"""

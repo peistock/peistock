@@ -117,6 +117,48 @@ def fetch_research_reports_em(code: str, limit: int = 3) -> List[Dict]:
     return reports
 
 
+def fetch_industry_reports_em(industry_name: str, limit: int = 2) -> List[Dict]:
+    """
+    尝试获取某行业的研报元数据。
+    优先使用 akshare 的行业研报接口，失败时返回空列表（不阻断主流程）。
+    """
+    if not industry_name or len(industry_name) < 2:
+        return []
+
+    ak = _safe_import_akshare()
+    if ak is None:
+        return []
+
+    # 尝试用行业名称查询东方财富研报（部分版本 akshare 支持）
+    try:
+        df = ak.stock_research_report_em(symbol=industry_name)
+        if df is None or len(df) == 0:
+            return []
+    except Exception as e:
+        logger.debug("[research_report] 行业研报查询失败 %s: %s", industry_name, e)
+        return []
+
+    reports = []
+    for _, r in df.head(limit).iterrows():
+        pdf_url = str(r.get("报告PDF链接", "") or "").strip()
+        info_code = _extract_info_code(pdf_url)
+        if not info_code:
+            continue
+        reports.append({
+            "title": str(r.get("报告名称", "") or "").strip(),
+            "org": str(r.get("机构", "") or "").strip(),
+            "author": "",
+            "date": str(r.get("日期", "") or "").strip(),
+            "industry": str(r.get("行业", "") or "").strip(),
+            "rating": str(r.get("东财评级", "") or "").strip(),
+            "info_code": info_code,
+            "pages": 0,
+            "url": pdf_url,
+        })
+
+    return reports
+
+
 def download_pdf(info_code: str, cache_dir: Path, timeout: int = 30) -> Optional[Path]:
     """
     下载研报 PDF 到缓存目录。
@@ -187,18 +229,21 @@ _OBJECTIVE_EXTRACTION_PROMPT = """你是一位严谨的数据提取专员。请�
 发布日期：{date}
 
 【必须提取的内容——按优先级排序】
-**A. 行业层面客观数据（优先级最高）**
-- 行业市场规模（全球/中国）、增速、渗透率
-- 产业链上下游关键数据：产能、产能利用率、库存、价格走势
-- 竞争格局：市占率排名、主要玩家份额
-- 行业前置指标：存储芯片价格指数、DRAM/NAND 价格、晶圆代工价格、PMI等
+**A. 行业层面客观数据（优先级最高，必须深挖）**
+- 行业供需格局：产能、产能利用率、库存水平、供需缺口/过剩
+- 价格数据：产品/原材料价格走势、期货价格、行业价格指数
+- 产业链上下游：上游原材料价格、下游需求变化、渠道库存
+- 竞争格局：市占率排名、主要玩家份额变化、新进入者/退出者
+- 行业前置指标：存储芯片价格指数、DRAM/NAND 价格、晶圆代工价格、PMI、能繁母猪存栏等
+- 如果多篇研报覆盖同一行业，请综合提取、去重，形成完整的行业数据视图
 
 **B. 公司层面客观数据（已披露的历史数据）**
 - 营收、净利润、毛利率、净利率（已披露的财报数据）
-- 销量/出货量、用户数、产能
+- 销量/出货量、用户数、产能、在手订单
 
 **C. 宏观经济/政策**
 - 相关宏观指标、政策变化（客观描述，不含解读）
+- 关税、出口管制、产业补贴、环保政策等影响行业的具体政策
 
 【必须排除的内容】
 - 投资评级、目标价
@@ -330,15 +375,18 @@ def _rule_extract_objective(text: str) -> str:
 def get_research_report_data(code: str,
                              market: str = "a",
                              limit: int = 3,
+                             industry: str = "",
                              llm=None,
                              max_chars: int = 15000) -> str:
     """
     获取研报客观数据的完整流程，返回可直接注入 prompt 的 Markdown 字符串。
+    同时获取个股研报 + 行业研报，以收集更多行业层面信息。
 
     Args:
         code: 股票代码（A股6位 / HK 5位）
         market: "a" / "hk"
-        limit: 最多处理几篇研报
+        limit: 最多处理几篇个股研报
+        industry: 行业名称（用于获取行业研报，可选；为空时自动获取）
         llm: LLM 客户端（用于提取客观数据，可选）
         max_chars: 每篇 PDF 最多提取字符数
 
@@ -350,7 +398,29 @@ def get_research_report_data(code: str,
         logger.info("[research_report] 暂只支持 A 股 6 位数字代码: %s", code)
         return ""
 
-    reports = fetch_research_reports_em(code, limit=limit)
+    # 如果 industry 为空，尝试自动获取
+    if not industry:
+        try:
+            import akshare as ak
+            info = ak.stock_individual_info_em(symbol=code)
+            industry = info.loc[info["item"] == "行业", "value"].values[0]
+        except Exception:
+            pass
+
+    # 1. 获取个股研报
+    stock_reports = fetch_research_reports_em(code, limit=limit)
+
+    # 2. 尝试获取行业研报（补充行业层面信息）
+    industry_reports = []
+    if industry:
+        try:
+            industry_reports = fetch_industry_reports_em(industry, limit=2)
+            if industry_reports:
+                logger.info("[research_report] 行业研报获取成功 %s: %d 篇", industry, len(industry_reports))
+        except Exception as e:
+            logger.debug("[research_report] 行业研报获取失败 %s: %s", industry, e)
+
+    reports = stock_reports + industry_reports
     if not reports:
         return ""
 

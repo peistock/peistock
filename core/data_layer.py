@@ -3,7 +3,9 @@ core/data_layer.py
 Real data sources: AKShare (A-share, HK) + yfinance (US)
 With graceful fallback to mock data when sources fail
 """
+import os
 import random
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -51,6 +53,11 @@ class DataLayer:
         self._yf = None
         self._cache = {}
         self._mock_sources: set = set()
+        if not os.environ.get("NO_PROXY"):
+            import logging
+            logging.getLogger(__name__).warning(
+                "NO_PROXY 未设置，akshare 可能走代理导致失败"
+            )
 
     def clear_mock_sources(self):
         self._mock_sources.clear()
@@ -178,54 +185,107 @@ class DataLayer:
         # so the value is comparable to dispersion_threshold (0.35 in config)
         return round(float(np.std(returns)) / 100.0, 4)
 
+    # --- 腾讯 K 线 fallback ---
+    def _fetch_tencent_klines(self, code: str, days: int = 300):
+        """直连腾讯财经 API 获取 K 线。返回 DataFrame[date, open, high, low, close, volume] 或 None。"""
+        import urllib.request
+        import json
+        import pandas as pd
+        clean = re.sub(r'[^0-9]', '', code)
+        if len(clean) == 5:
+            tencent_symbol = f"hk{clean}"
+            is_hk = True
+        elif clean.startswith('6') or clean.startswith('5'):
+            tencent_symbol = f"sh{clean}"
+            is_hk = False
+        else:
+            tencent_symbol = f"sz{clean}"
+            is_hk = False
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,500,qfq"
+        try:
+            req = urllib.request.Request(url, headers={
+                "Accept": "application/json",
+                "Referer": "https://stock.qq.com",
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if data.get("code") != 0 or not data.get("data"):
+                return None
+            stock_data = data["data"][tencent_symbol]
+            klines = stock_data.get("qfqday") or stock_data.get("day") or []
+            if not klines:
+                return None
+            records = []
+            for item in klines:
+                vol = int(float(item[5]))
+                records.append({
+                    "date": str(item[0]),
+                    "open": float(item[1]) if item[1] else 0,
+                    "close": float(item[2]) if item[2] else 0,
+                    "high": float(item[3]) if item[3] else 0,
+                    "low": float(item[4]) if item[4] else 0,
+                    "volume": vol,
+                    "amount": 0.0,
+                })
+            if len(records) < days // 2:
+                return None
+            df = pd.DataFrame(records)
+            df["date"] = df["date"].astype(str)
+            for col in ["open", "high", "low", "close", "volume", "amount"]:
+                df[col] = df[col].astype(float)
+            return df.reset_index(drop=True)
+        except Exception:
+            return None
+
     # --- A/HK 个股 K 线 ---
     def get_a_stock_history(self, code: str, days: int = 300):
-        """A 股日 K (前复权)。返回 DataFrame[date, open, high, low, close, volume, amount] 或 None。"""
+        """A 股日 K (前复权)。优先 akshare，失败走腾讯 K 线 fallback，再失败走 mock。"""
         self._init_akshare()
-        if not self._ak:
-            self._mock_sources.add(f"a_stock_history:{code}")
-            return self._mock_stock_history(code, days)
-        end = datetime.now()
-        start = end - timedelta(days=int(days * 1.6) + 30)  # 跳过非交易日,留余量
-        try:
-            df = self._ak.stock_zh_a_hist(
-                symbol=str(code),
-                period="daily",
-                start_date=start.strftime("%Y%m%d"),
-                end_date=end.strftime("%Y%m%d"),
-                adjust="qfq",
-            )
-            if df is None or len(df) == 0:
-                self._mock_sources.add(f"a_stock_history:{code}")
-                return self._mock_stock_history(code, days)
-            return self._normalize_hist_df(df)
-        except Exception:
-            self._mock_sources.add(f"a_stock_history:{code}")
-            return self._mock_stock_history(code, days)
+        if self._ak:
+            end = datetime.now()
+            start = end - timedelta(days=int(days * 1.6) + 30)
+            try:
+                df = self._ak.stock_zh_a_hist(
+                    symbol=str(code),
+                    period="daily",
+                    start_date=start.strftime("%Y%m%d"),
+                    end_date=end.strftime("%Y%m%d"),
+                    adjust="qfq",
+                )
+                if df is not None and len(df) > 0:
+                    return self._normalize_hist_df(df)
+            except Exception:
+                pass
+        # fallback: 腾讯 K 线
+        tdf = self._fetch_tencent_klines(code, days=days)
+        if tdf is not None and len(tdf) > 0:
+            return tdf
+        self._mock_sources.add(f"a_stock_history:{code}")
+        return self._mock_stock_history(code, days)
 
     def get_hk_stock_history(self, code: str, days: int = 300):
-        """HK 日 K (前复权)。"""
+        """HK 日 K (前复权)。优先 akshare，失败走腾讯 K 线 fallback，再失败走 mock。"""
         self._init_akshare()
-        if not self._ak:
-            self._mock_sources.add(f"hk_stock_history:{code}")
-            return self._mock_stock_history(code, days)
-        end = datetime.now()
-        start = end - timedelta(days=int(days * 1.6) + 30)
-        try:
-            df = self._ak.stock_hk_hist(
-                symbol=str(code).zfill(5),
-                period="daily",
-                start_date=start.strftime("%Y%m%d"),
-                end_date=end.strftime("%Y%m%d"),
-                adjust="qfq",
-            )
-            if df is None or len(df) == 0:
-                self._mock_sources.add(f"hk_stock_history:{code}")
-                return self._mock_stock_history(code, days)
-            return self._normalize_hist_df(df)
-        except Exception:
-            self._mock_sources.add(f"hk_stock_history:{code}")
-            return self._mock_stock_history(code, days)
+        if self._ak:
+            end = datetime.now()
+            start = end - timedelta(days=int(days * 1.6) + 30)
+            try:
+                df = self._ak.stock_hk_hist(
+                    symbol=str(code).zfill(5),
+                    period="daily",
+                    start_date=start.strftime("%Y%m%d"),
+                    end_date=end.strftime("%Y%m%d"),
+                    adjust="qfq",
+                )
+                if df is not None and len(df) > 0:
+                    return self._normalize_hist_df(df)
+            except Exception:
+                pass
+        tdf = self._fetch_tencent_klines(code, days=days)
+        if tdf is not None and len(tdf) > 0:
+            return tdf
+        self._mock_sources.add(f"hk_stock_history:{code}")
+        return self._mock_stock_history(code, days)
 
     def get_stock_history(self, code: str, days: int = 300):
         """自动按市场 dispatch。"""
@@ -257,39 +317,83 @@ class DataLayer:
         df = df.reset_index(drop=True)
         return df
 
+    # --- 腾讯 API fallback (生产环境主路径，绕过 akshare spot 限流) ---
+    def _fetch_tencent_quote(self, code: str) -> Dict:
+        """直连腾讯财经 API 获取 quote + capital。返回 {name, price, change_pct, capital}，失败返回 {}。"""
+        import urllib.request
+        market = _market_of(code)
+        if market == "hk":
+            tencent_symbol = f"hk{code.zfill(5)}"
+        elif code.startswith('6') or code.startswith('5'):
+            tencent_symbol = f"sh{code}"
+        else:
+            tencent_symbol = f"sz{code}"
+        url = f"https://qt.gtimg.cn/q={tencent_symbol}"
+        try:
+            req = urllib.request.Request(url, headers={"Referer": "https://stock.qq.com"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read().decode("gbk", errors="ignore")
+            prefix = f'v_{tencent_symbol}="'
+            if prefix not in data:
+                return {}
+            content = data.split(prefix)[1].rsplit('";', 1)[0]
+            parts = content.split("~")
+            if len(parts) < 45:
+                return {}
+            result = {
+                "name": parts[1],
+                "price": float(parts[3]) if parts[3] else 0,
+                "change_pct": float(parts[32]) if parts[32] else 0,
+            }
+            if market == "hk":
+                result["capital"] = int(float(parts[70])) if len(parts) > 70 and parts[70] else 0
+            else:
+                result["capital"] = int(float(parts[72])) if len(parts) > 72 and parts[72] else 0
+            return result
+        except Exception:
+            return {}
+
     def get_stock_quote(self, code: str) -> Dict:
-        """实时行情快照(akshare spot 表延迟约 3-15 分钟)。"""
+        """实时行情快照。优先 akshare spot，失败时走腾讯 API fallback，再失败走 mock。"""
         self._init_akshare()
         code = str(code)
         market = _market_of(code)
-        if not self._ak:
-            self._mock_sources.add(f"stock_quote:{code}")
-            return self._mock_stock_quote(code)
-        try:
-            if market == "a":
-                df = self._ak.stock_zh_a_spot_em()
-                row = df[df["代码"] == code]
-            else:
-                df = self._ak.stock_hk_spot_em()
-                code_5 = code.zfill(5)
-                row = df[df["代码"] == code_5]
-            if row is None or len(row) == 0:
-                self._mock_sources.add(f"stock_quote:{code}")
-                return self._mock_stock_quote(code)
-            r = row.iloc[0]
+        # 优先 akshare
+        if self._ak:
+            try:
+                if market == "a":
+                    df = self._ak.stock_zh_a_spot_em()
+                    row = df[df["代码"] == code]
+                else:
+                    df = self._ak.stock_hk_spot_em()
+                    code_5 = code.zfill(5)
+                    row = df[df["代码"] == code_5]
+                if row is not None and len(row) > 0:
+                    r = row.iloc[0]
+                    return {
+                        "code": code,
+                        "name": str(r.get("名称", "")),
+                        "price": float(r.get("最新价", 0) or 0),
+                        "change_pct": float(r.get("涨跌幅", 0) or 0),
+                        "market": market,
+                    }
+            except Exception:
+                pass
+        # fallback: 腾讯 API
+        tencent = self._fetch_tencent_quote(code)
+        if tencent:
             return {
                 "code": code,
-                "name": str(r.get("名称", "")),
-                "price": float(r.get("最新价", 0) or 0),
-                "change_pct": float(r.get("涨跌幅", 0) or 0),
+                "name": tencent["name"],
+                "price": tencent["price"],
+                "change_pct": tencent["change_pct"],
                 "market": market,
             }
-        except Exception:
-            self._mock_sources.add(f"stock_quote:{code}")
-            return self._mock_stock_quote(code)
+        self._mock_sources.add(f"stock_quote:{code}")
+        return self._mock_stock_quote(code)
 
     def get_stock_capital(self, code: str) -> float:
-        """流通股本(单位:股)。A 走 stock_individual_info_em,HK 走 hardcoded 表。"""
+        """流通股本(单位:股)。A 走 akshare → 腾讯 fallback；HK 走 hardcoded 表 → 腾讯 fallback。"""
         self._init_akshare()
         code = str(code)
         market = _market_of(code)
@@ -297,25 +401,28 @@ class DataLayer:
             cap = HK_CAPITAL_OVERRIDES.get(code.zfill(5))
             if cap:
                 return float(cap)
-            # 兜底:用 5e9 作为大盘股近似,小盘股会过低,但好过崩溃
+            tencent = self._fetch_tencent_quote(code)
+            if tencent and tencent.get("capital"):
+                return float(tencent["capital"])
             self._mock_sources.add(f"stock_capital:{code}")
             return 5_000_000_000.0
-        if not self._ak:
-            self._mock_sources.add(f"stock_capital:{code}")
-            return 1_000_000_000.0
-        try:
-            df = self._ak.stock_individual_info_em(symbol=code)
-            # 列名: item, value
-            cols = df.columns.tolist()
-            if "item" in cols and "value" in cols:
-                m = df[df["item"] == "流通股"]
-                if len(m) == 0:
-                    m = df[df["item"] == "流通A股"]
-                if len(m) > 0:
-                    val = m.iloc[0]["value"]
-                    return float(val)
-        except Exception:
-            pass
+        # A 股
+        if self._ak:
+            try:
+                df = self._ak.stock_individual_info_em(symbol=code)
+                cols = df.columns.tolist()
+                if "item" in cols and "value" in cols:
+                    m = df[df["item"] == "流通股"]
+                    if len(m) == 0:
+                        m = df[df["item"] == "流通A股"]
+                    if len(m) > 0:
+                        val = m.iloc[0]["value"]
+                        return float(val)
+            except Exception:
+                pass
+        tencent = self._fetch_tencent_quote(code)
+        if tencent and tencent.get("capital"):
+            return float(tencent["capital"])
         self._mock_sources.add(f"stock_capital:{code}")
         return 1_000_000_000.0
 
@@ -600,11 +707,7 @@ class DataLayer:
         return {
             "timestamp": datetime.now().isoformat(),
             "a_spot": self.get_a_spot(),
-            "mag7": self.get_us_tickers(["GOOGL", "META", "MSFT", "AMZN", "NVDA", "AAPL"]),
-            "pmi": self.get_pmi(),
             "vix": self.get_vix(),
-            "margin_concentration": self.get_margin_concentration(),
-            "mag7_dispersion": self.get_mag7_dispersion(),
             "a_dispersion": self.get_a_leader_dispersion(),
             "hk_dispersion": self.get_hk_leader_dispersion(),
             "a_breadth": self.get_a_market_breadth(),

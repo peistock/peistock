@@ -114,7 +114,8 @@ def fetch_stock_news(code: str, market: str = "a", limit: int = 10) -> List[Dict
 
 def fetch_stock_notices(code: str, limit: int = 5) -> List[Dict]:
     """
-    抓取个股公告(A 股,akshare:stock_individual_notice_report)。HK 暂不支持。
+    抓取个股公告(A 股)。优先 akshare，失败走巨潮资讯备用源，再失败返空 list。
+    HK 暂不支持。
 
     Returns:
         List[{title, content, time, source, url}],失败返空 list(公告非必需)。
@@ -122,28 +123,45 @@ def fetch_stock_notices(code: str, limit: int = 5) -> List[Dict]:
     if not (len(code) == 6 and code.isdigit()):
         return []
 
+    # 1. 优先 akshare
     ak = _safe_import_akshare()
-    if ak is None:
-        return []
+    if ak is not None:
+        try:
+            df = ak.stock_individual_notice_report(security=code)
+            if df is not None and len(df) > 0:
+                rows: List[Dict] = []
+                for _, r in df.iterrows():
+                    rows.append({
+                        "title": str(r.get("公告标题", "") or r.get("标题", "")).strip(),
+                        "content": "",
+                        "time": str(r.get("公告日期", "") or r.get("日期", "")).strip(),
+                        "source": "公告",
+                        "url": str(r.get("公告链接", "") or "").strip(),
+                    })
+                rows.sort(key=lambda x: x["time"], reverse=True)
+                return rows[:limit]
+        except Exception as e:
+            logger.warning("[news] akshare notice failed for %s: %s", code, e)
 
+    # 2. 巨潮资讯备用源
     try:
-        df = ak.stock_individual_notice_report(security=code)
-        if df is None or len(df) == 0:
-            return []
-        rows: List[Dict] = []
-        for _, r in df.iterrows():
-            rows.append({
-                "title": str(r.get("公告标题", "") or r.get("标题", "")).strip(),
-                "content": "",
-                "time": str(r.get("公告日期", "") or r.get("日期", "")).strip(),
-                "source": "公告",
-                "url": str(r.get("公告链接", "") or "").strip(),
-            })
-        rows.sort(key=lambda x: x["time"], reverse=True)
-        return rows[:limit]
+        from core.cninfo_api import fetch_cninfo_notices
+        cninfo_rows = fetch_cninfo_notices(code, market="a", limit=limit)
+        if cninfo_rows:
+            return [
+                {
+                    "title": r["title"],
+                    "content": "",
+                    "time": r["time"],
+                    "source": "巨潮资讯" + (f"·{r['type']}" if r.get("type") else ""),
+                    "url": r.get("url", ""),
+                }
+                for r in cninfo_rows
+            ]
     except Exception as e:
-        logger.warning("[news] notice fetch failed for %s: %s", code, e)
-        return []
+        logger.warning("[news] cninfo notice fallback failed for %s: %s", code, e)
+
+    return []
 
 
 def fetch_macro_news(limit: int = 15) -> List[Dict]:

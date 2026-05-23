@@ -40,7 +40,10 @@ class BullBearAnalyst:
     def analyze_stock(self, side: str, code: str, quote: Dict,
                       indicators_latest: Dict, signal_result: Dict,
                       news: Optional[List[Dict]] = None,
-                      research_report: Optional[str] = None) -> AnalystResult:
+                      research_report: Optional[str] = None,
+                      sector_context: Optional[str] = None,
+                      history_context: Optional[str] = None,
+                      metal_context: Optional[str] = None) -> AnalystResult:
         """个股 Bull/Bear。复用市场级 system_prompt,user_prompt 包注入指标数字 + 近期新闻 + 研报数据。"""
         system_prompt = self.bull_prompt if side == "bull" else self.bear_prompt
         if self.llm is None:
@@ -49,7 +52,8 @@ class BullBearAnalyst:
 
         user_prompt = self._build_stock_user_prompt(
             side, code, quote, indicators_latest, signal_result,
-            news=news, research_report=research_report
+            news=news, research_report=research_report, sector_context=sector_context,
+            history_context=history_context, metal_context=metal_context
         )
 
         try:
@@ -192,7 +196,10 @@ class BullBearAnalyst:
     def _build_stock_user_prompt(self, side: str, code: str, quote: Dict,
                                  ind: Dict, signal_result: Dict,
                                  news: Optional[List[Dict]] = None,
-                                 research_report: Optional[str] = None) -> str:
+                                 research_report: Optional[str] = None,
+                                 sector_context: Optional[str] = None,
+                                 history_context: Optional[str] = None,
+                                 metal_context: Optional[str] = None) -> str:
         """个股 prompt: 注入 peistock 指标摘要 + 严格 B/S 信号 + 近期新闻与公告 + 研报客观数据。"""
         def fmt(v, nd=2):
             if v is None:
@@ -209,6 +216,14 @@ class BullBearAnalyst:
             f"Stock: {code} {quote.get('name') or ''}  ({market_label})",
             f"Price: {fmt(quote.get('price'))} ({fmt(quote.get('change_pct'))}%)",
             "",
+        ]
+
+        # 历史决策记录注入（回测闭环）
+        if history_context:
+            lines.append(history_context)
+            lines.append("")
+
+        lines.extend([
             "Peistock indicators (latest):",
             f"- close vs MAHS:        {fmt(ind.get('close'))} vs {fmt(ind.get('mahs'))}",
             f"- MA20 / MA60 / MA225:  {fmt(ind.get('ma20'))} / {fmt(ind.get('ma60'))} / {fmt(ind.get('ma225'))}",
@@ -220,12 +235,25 @@ class BullBearAnalyst:
             f"- PVT divergence:       {ind.get('pvt_divergence') or 'none'}",
             f"- Trend strength:       {ind.get('trend_strength') or 'unknown'}",
             "",
+        ])
+
+        # 板块背景注入（A 股当日行业排名）
+        if sector_context:
+            lines.append(sector_context)
+            lines.append("")
+
+        # 贵金属/有色金属宏观关联注入
+        if metal_context:
+            lines.append(metal_context)
+            lines.append("")
+
+        lines.extend([
             "Strict B/S signals (xueqiu thresholds):",
             f"- signal_type:   {signal_result.get('signal_type') or 'none'}",
             f"- signals:       {', '.join(signal_result.get('signals') or []) or '(none)'}",
             "",
             "Recent news & announcements (descending by time):",
-        ]
+        ])
 
         if news:
             from core.news_fetcher import summarize_for_prompt
