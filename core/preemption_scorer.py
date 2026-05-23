@@ -177,21 +177,25 @@ def build_preemption_score_from_prompt_data(
 ) -> Optional[Dict]:
     """
     从 prompt 注入的 Markdown 数据中提取数字，自动计算 Preemption 评分。
-    如果数据不全，返回 None（让 LLM 降级为定性分析）。
+    如果财报数据不全，返回 None（让 LLM 降级为定性分析）。
+    如果预期数据缺失，使用 actual 数据的 50% 作为 fallback（避免完全无法计算）。
     """
     actual = _extract_speed_values(financial_md)
     expected = _extract_speed_values(expectation_md)
 
     if "revenue_yoy" not in actual or "profit_yoy" not in actual:
         return None
-    if "revenue_yoy" not in expected or "profit_yoy" not in expected:
-        return None
+
+    # 预期数据缺失时的 fallback：使用 actual 的 50% 作为中性预期锚点
+    # 这样实际增速为正时会产生正向偏离，增速为负时产生负向偏离
+    expected_rev = expected.get("revenue_yoy", actual["revenue_yoy"] * 0.5)
+    expected_profit = expected.get("profit_yoy", actual["profit_yoy"] * 0.5)
 
     return calc_preemption_score(
         actual_rev_yoy=actual["revenue_yoy"],
         actual_profit_yoy=actual["profit_yoy"],
-        expected_rev_yoy=expected["revenue_yoy"],
-        expected_profit_yoy=expected["profit_yoy"],
+        expected_rev_yoy=expected_rev,
+        expected_profit_yoy=expected_profit,
         price_change_5d=price_change_5d,
         price_change_vacuum=price_change_vacuum,
     )

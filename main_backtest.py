@@ -72,6 +72,9 @@ def load_real_decisions(decisions_dir="data/stock_decisions"):
                 "bull_confidence": card.get("bull_confidence"),
                 "bear_confidence": card.get("bear_confidence"),
                 "preemption_score": card.get("preemption_score"),
+                "macro_industry_score": card.get("macro_industry_score"),
+                "weighted_score": card.get("weighted_score"),
+                "sentiment_rating": card.get("sentiment_rating"),
             })
         except Exception as e:
             print(f"[Warning] 读取决策卡失败 {fpath}: {e}")

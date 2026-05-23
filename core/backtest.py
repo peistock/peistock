@@ -2,7 +2,8 @@
 core/backtest.py
 Backtest engine: validate decision cards against historical data
 
-支持 A 股（akshare）、港股（yfinance）、美股（yfinance）。
+A 股 / 港股：腾讯 API（web.ifzq.gtimg.cn）获取 K 线，绕过 akshare/yfinance 的不稳定。
+美股：yfinance。
 """
 import json
 import os
@@ -10,8 +11,53 @@ import re
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import yfinance as yf
 import pandas as pd
+import urllib.request
+import yfinance as yf
+
+
+def _fetch_tencent_klines(code: str):
+    """直连腾讯财经 API 获取 K 线。返回 DataFrame[date, open, high, low, close, volume] 或 None。"""
+    import json
+    clean = re.sub(r'[^0-9]', '', code)
+    if len(clean) == 5:
+        tencent_symbol = f"hk{clean}"
+    elif clean.startswith('6') or clean.startswith('5'):
+        tencent_symbol = f"sh{clean}"
+    else:
+        tencent_symbol = f"sz{clean}"
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_symbol},day,,,500,qfq"
+    try:
+        req = urllib.request.Request(url, headers={
+            "Accept": "application/json",
+            "Referer": "https://stock.qq.com",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("code") != 0 or not data.get("data"):
+            return None
+        stock_data = data["data"][tencent_symbol]
+        klines = stock_data.get("qfqday") or stock_data.get("day") or []
+        if not klines:
+            return None
+        records = []
+        for item in klines:
+            vol = int(float(item[5]))
+            records.append({
+                "date": str(item[0]),
+                "open": float(item[1]) if item[1] else 0,
+                "close": float(item[2]) if item[2] else 0,
+                "high": float(item[3]) if item[3] else 0,
+                "low": float(item[4]) if item[4] else 0,
+                "volume": vol,
+            })
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"])
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    except Exception:
+        return None
 
 
 @dataclass
@@ -32,6 +78,8 @@ class TradeRecord:
     bull_confidence: Optional[float] = None
     bear_confidence: Optional[float] = None
     preemption_score: Optional[float] = None
+    macro_industry_score: Optional[float] = None
+    weighted_score: Optional[float] = None
 
     def to_dict(self):
         return asdict(self)
@@ -96,30 +144,29 @@ class BacktestEngine:
         if ticker in self.price_cache:
             return self.price_cache[ticker]
 
-        # A 股：优先 akshare（更准）
-        if ticker.endswith(".SS") or ticker.endswith(".SZ"):
-            code = ticker.split(".")[0]
-            try:
-                import akshare as ak
-                df = ak.stock_zh_a_hist(
-                    symbol=code, period="daily",
-                    start_date=self.start_date.replace("-", ""),
-                    end_date=self.end_date.replace("-", ""),
-                    adjust="qfq",
-                )
-                if not df.empty:
-                    df = df.rename(columns={
-                        "日期": "Date", "开盘": "Open", "收盘": "Close",
-                        "最高": "High", "最低": "Low", "成交量": "Volume",
-                    })
-                    df["Date"] = pd.to_datetime(df["Date"])
-                    df.set_index("Date", inplace=True)
-                    self.price_cache[ticker] = df
-                    return df
-            except Exception as e:
-                print(f"[Backtest] akshare 获取 {ticker} 失败，fallback yfinance: {e}")
+        # 美股：继续用 yfinance
+        if ticker.isalpha():
+            df = yf.download(ticker, start=self.start_date, end=self.end_date, progress=False)
+            if df.empty:
+                raise ValueError("No data for " + ticker)
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            self.price_cache[ticker] = df
+            return df
 
-        # 港股 / 美股 / fallback：yfinance
+        # A 股 / 港股：优先腾讯 API（绕过 akshare/yfinance 的不稳定）
+        code = ticker.replace(".SS", "").replace(".SZ", "").replace(".HK", "")
+        df = _fetch_tencent_klines(code)
+        if df is not None and not df.empty:
+            df = df.rename(columns={
+                "date": "Date", "open": "Open", "close": "Close",
+                "high": "High", "low": "Low", "volume": "Volume",
+            })
+            df.set_index("Date", inplace=True)
+            df = df[(df.index >= self.start_date) & (df.index <= self.end_date)]
+            self.price_cache[ticker] = df
+            return df
+
+        # fallback：yfinance
         df = yf.download(ticker, start=self.start_date, end=self.end_date, progress=False)
         if df.empty:
             raise ValueError("No data for " + ticker)
@@ -175,7 +222,9 @@ class BacktestEngine:
                   thesis: str, entry_price: float = None,
                   bull_confidence: float = None,
                   bear_confidence: float = None,
-                  preemption_score: float = None) -> Optional[TradeRecord]:
+                  preemption_score: float = None,
+                  macro_industry_score: float = None,
+                  weighted_score: float = None) -> Optional[TradeRecord]:
         # 优先使用传入的 entry_price（决策卡中的 price），否则从行情获取
         if entry_price is None:
             entry_price = self.get_price_on_date(ticker, entry_date)
@@ -215,6 +264,8 @@ class BacktestEngine:
             bull_confidence=bull_confidence,
             bear_confidence=bear_confidence,
             preemption_score=preemption_score,
+            macro_industry_score=macro_industry_score,
+            weighted_score=weighted_score,
         )
 
     def run_full_backtest(self, decision_cards: List[Dict]) -> Dict:

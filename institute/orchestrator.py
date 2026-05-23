@@ -67,14 +67,31 @@ class ResearchInstitute:
             if role.model and role.model != self.llm.model_daily:
                 alt_models.add(role.model)
 
+        # 模型环境变量别名映射：model_name -> 环境变量前缀
+        MODEL_ENV_ALIASES = {
+            "deepseek-v4-pro": "DEEPSEEK_PRO",
+        }
+
         alt_llms = {}
         for model_name in alt_models:
             env_key = model_name.upper().replace("-", "_").replace(".", "_")
-            base_url = os.getenv(f"ALT_MODEL_{env_key}_BASE_URL")
-            api_key = os.getenv(f"ALT_MODEL_{env_key}_API_KEY")
+            alias = MODEL_ENV_ALIASES.get(model_name)
+
+            # 优先尝试别名，再尝试自动生成的 env_key
+            base_url = None
+            api_key = None
+            used_prefix = None
+            for prefix in ([alias] if alias else []) + [f"ALT_MODEL_{env_key}"]:
+                base_url = os.getenv(f"{prefix}_BASE_URL")
+                api_key = os.getenv(f"{prefix}_API_KEY")
+                if base_url and api_key:
+                    used_prefix = prefix
+                    break
+
             if not base_url or not api_key:
                 logger.warning(f"角色配置了模型 '{model_name}'，但未找到对应环境变量 "
-                               f"(ALT_MODEL_{env_key}_BASE_URL / API_KEY)，将使用默认模型")
+                               f"({alias + '_BASE_URL / API_KEY' if alias else ''} "
+                               f"ALT_MODEL_{env_key}_BASE_URL / API_KEY)，将使用默认模型")
                 continue
             try:
                 # 绕过单例创建新实例
@@ -452,6 +469,30 @@ class ResearchInstitute:
         today = datetime.now().strftime("%Y年%m月%d日")
         system_prompt = self._build_system_prompt(role, today, context=context)
 
+        # Chair 角色：将 Risk Manager 结果注入 system prompt 以增强可见性
+        if slug == "chair_debate" and context and context.get("risk_assessment"):
+            risk = context["risk_assessment"]
+            risk_addon = (
+                f"\n\n【风控约束（必须遵守）】\n"
+                f"Risk Manager 判定当前风险等级为 {risk['risk_level']}（总风险分 {risk['total_score']:.1f}/100）。\n"
+            )
+            if risk["risk_level"] == "HIGH":
+                risk_addon += (
+                    "你的 confidence 上限锁死 60 分，必须给出比平时更严格的止损位（收紧 30%），"
+                    "裁决理由第一段必须明确说明 'Risk Manager 判定 HIGH 风险，已调整仓位和止损'。\n"
+                )
+            elif risk["risk_level"] == "MEDIUM":
+                risk_addon += (
+                    "建议适当降低仓位至半仓水平，裁决理由中必须说明风险来源。\n"
+                )
+            else:
+                risk_addon += (
+                    "裁决理由第一段必须简要提及 'Risk Manager 判定 LOW 风险'，然后正常裁决。\n"
+                )
+            risk_addon += "无论风险等级高低，裁决理由中必须明确提及 Risk Manager 的判定结果（HIGH/MEDIUM/LOW），不能省略。\n"
+            system_prompt += risk_addon
+            logger.info(f"[{slug}] Risk Manager 已注入 system prompt: {risk['risk_level']}")
+
         # 自动议题生成：获取该角色当日热点议题
         try:
             tg = TopicGenerator()
@@ -627,6 +668,48 @@ class ResearchInstitute:
                 except Exception as e:
                     logger.warning(f"[chair] 历史决策记录注入失败: {e}")
 
+                # 注入 Risk Manager 风控评估结果（Phase 2.5）
+                risk_assessment = context.get("risk_assessment") if context else None
+                if risk_assessment:
+                    logger.info(f"[chair] 注入风控评估: {code} ({risk_assessment['risk_level']})")
+                    risk_md = (
+                        f"【风控评估结果（Risk Manager）】\n\n"
+                        f"- 风险等级: {risk_assessment['risk_level']}\n"
+                        f"- 总风险分: {risk_assessment['total_score']:.1f}/100\n"
+                        f"- 仓位限制: {risk_assessment['position_limit']}\n"
+                        f"- 子风险详情:\n"
+                        f"  - 共识风险 (Bull/Bear 分歧): {risk_assessment['sub_risks']['consensus_risk']:.1f}\n"
+                        f"  - 情绪极端风险: {risk_assessment['sub_risks']['sentiment_extreme_risk']:.1f}\n"
+                        f"  - 信息消化风险: {risk_assessment['sub_risks']['digestion_risk']:.1f}\n"
+                        f"  - 波动率风险: {risk_assessment['sub_risks']['volatility_risk']:.1f}\n\n"
+                    )
+                    if risk_assessment["risk_level"] == "HIGH":
+                        risk_md += (
+                            "**重要指令**：Risk Manager 判定当前为 HIGH 风险。你必须遵守以下约束：\n"
+                            "1. confidence 上限锁死 60 分，不得超过。\n"
+                            "2. 必须给出比平时更严格的止损位（例如收紧 30%）。\n"
+                            "3. 在裁决理由中明确说明 'Risk Manager 判定 HIGH 风险，已调整仓位和止损'。\n"
+                        )
+                    elif risk_assessment["risk_level"] == "MEDIUM":
+                        risk_md += (
+                            "**提示**：Risk Manager 判定当前为 MEDIUM 风险。建议适当降低仓位至半仓水平，"
+                            "并在裁决理由中说明风险来源。\n"
+                        )
+                    messages.append(AgentMessage.user(risk_md))
+
+                # 注入 Bull/Bear 辩论摘要（Phase 1.5）
+                debate_summary = context.get("debate_summary") if context else None
+                if debate_summary:
+                    logger.info(f"[chair] 注入辩论摘要: {code}")
+                    messages.append(AgentMessage.user(
+                        f"【Bull/Bear 对抗辩论摘要】\n\n"
+                        f"{debate_summary}\n\n"
+                        f"**重要指令**：以上摘要是 Bull 初稿、Bear 逐条反驳、Bull 逐条回应三轮交锋的浓缩。"
+                        f"你在裁决时必须参考这些信息：如果 Bull 的核心论据在回应中被 Bear 有效驳倒，应降低 Bull 置信度；"
+                        f"如果 Bull 成功回应了 Bear 的反驳，且核心论据仍然成立，应维持或提高 Bull 置信度。"
+                        f"辩论摘要只作为你裁决的**补充信息**，不替代你自己的独立判断。"
+                    ))
+
         # 依赖角色：注入已完成的分析师报告（全部读完整原文，Chair 不再截断）
         if role.dependencies:
             dep_reports = []
@@ -662,6 +745,10 @@ class ResearchInstitute:
             )
             # 清洗模型 reasoning token
             reply = self._clean_reasoning_tokens(reply)
+
+            # JSON 输出角色：去除 JSON 前面的思考过程
+            if role.slug in ("bull", "bear"):
+                reply = self._strip_thinking_before_json(reply)
 
             report_content = self._format_report(role, today, reply)
 
@@ -887,6 +974,23 @@ class ResearchInstitute:
             lines.append("")
             lines.append("你可以选择围绕上述议题展开分析，也可以根据最新搜索结果自行判断今日最重要的研究方向。")
 
+        # 注入辩论相关上下文（Phase 1.5）
+        if role.slug == "bear_rebuttal" and context and context.get("bull_report"):
+            lines.append("")
+            lines.append("【多头分析师（Bull）初稿报告】")
+            lines.append("请仔细阅读以下 Bull 初稿，然后逐条给出你的反驳：")
+            lines.append("---")
+            lines.append(context.get("bull_report"))
+            lines.append("---")
+
+        if role.slug == "bull_response" and context and context.get("bear_rebuttal_report"):
+            lines.append("")
+            lines.append("【空头反驳员（Bear Rebuttal）的反驳报告】")
+            lines.append("请仔细阅读以下 Bear 的反驳，然后逐条给出你的回应：")
+            lines.append("---")
+            lines.append(context.get("bear_rebuttal_report"))
+            lines.append("---")
+
         lines.extend([
             "",
             "重要：",
@@ -924,6 +1028,33 @@ class ResearchInstitute:
         # 清理多余空行
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+
+    def _strip_thinking_before_json(self, text: str) -> str:
+        """对于强制 JSON 输出的角色，去除 JSON 对象前面的思考过程。
+        deepseek-v4-flash 等模型经常在 JSON 前输出中文思考过程（如'好的，用户让我...'），
+        这些内容是模型内部推理，不应写入最终报告。
+        """
+        import re
+        json_start = text.find("{")
+        if json_start <= 0:
+            return text
+        prefix = text[:json_start].strip()
+        if len(prefix) < 30:
+            return text
+        # 常见思考过程标志词
+        thinking_markers = [
+            "好的，", "首先，", "我需要", "让我", "我注意到",
+            "用户让我", "我已完成", "让我开始", "我来分析",
+            "我需要构建", "关于", "从预注入", "从用户",
+            "我需要仔细", "我需要基于", "让我仔细", "我需要构建",
+            "输出格式要求", "最终JSON", "最终输出", "直接输出",
+        ]
+        if any(m in prefix for m in thinking_markers):
+            candidate = text[json_start:]
+            # 验证确实是 JSON 输出角色常见的字段
+            if '"signal"' in candidate or '"confidence"' in candidate:
+                return candidate
+        return text
 
     def _extract_thesis_and_confidence(self, report_content: str) -> tuple:
         """从 Bull/Bear 报告中提取核心论点 (thesis) 和置信度"""

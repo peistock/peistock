@@ -26,6 +26,13 @@ VERIFY_PROMPT = """你是一位严谨的事实核查员。请对以下声明进�
 2. 如果声明存疑（数字异常、逻辑矛盾、来源不明），回复 "QUESTION: 原因"
 3. 如果声明明显错误（违背常识、数据荒谬），回复 "FAIL: 原因"
 
+宽容原则（不要过度标记）：
+- 以下数字类型来自系统预注入的实时数据，只要数值本身合理、无矛盾，直接 PASS，不要仅因"孤立"就标 QUESTION：
+  * 技术指标数字：CRI、MAHS、EMAHS、BIAS225、成本偏离分位、贪婪指数等
+  * 行情数据：股价（如"61.8港元"）、涨跌幅、成交量
+  * 财报核心指标：营收、净利润、毛利率、ROE、EPS 等（通常已在报告正文中标明来源为[已发布财报]）
+- 只有当你能明确判断某个数字违背常识（如毛利率 >100%、股价为负数）或与其他数据矛盾时，才标 QUESTION/FAIL
+
 额外检查（时间线一致性）：
 - 若报告中同时出现"预计/即将/等待/下周/待发布/将发布"等未来时间标记，又出现具体的财务数据（如"营收同比+11%""净利润增长+20%"），必须标记为 QUESTION 或 FAIL
 - 若日期声明与当前已知时间线明显矛盾（如 2026 年 5 月称"Q1 财报即将发布"但又有具体 Q1 营收数字），必须标记为 QUESTION
@@ -40,13 +47,23 @@ VERIFY_PROMPT = """你是一位严谨的事实核查员。请对以下声明进�
 """
 
 
+def _extract_with_context(text: str, match, ctx_chars: int = 20) -> str:
+    """提取匹配内容及其前后上下文，避免孤立数字无意义。"""
+    start = max(0, match.start() - ctx_chars)
+    end = min(len(text), match.end() + ctx_chars)
+    snippet = text[start:end].replace("\n", " ").strip()
+    # 清理多余空格
+    return " ".join(snippet.split())
+
+
 def extract_claims(text: str, max_claims: int = 10) -> List[Dict]:
-    """从报告中提取关键声明"""
+    """从报告中提取关键声明（数字声明附带前后上下文）"""
     claims = []
 
-    # 数字声明
+    # 数字声明：附带前后20字符上下文，避免孤立数字
     for m in CLAIM_PATTERNS["numeric"].finditer(text):
-        claims.append({"type": "numeric", "text": m.group(0), "pos": m.start()})
+        snippet = _extract_with_context(text, m, ctx_chars=20)
+        claims.append({"type": "numeric", "text": snippet, "pos": m.start()})
 
     # 时间声明
     for m in CLAIM_PATTERNS["temporal"].finditer(text):
@@ -56,12 +73,15 @@ def extract_claims(text: str, max_claims: int = 10) -> List[Dict]:
     for m in CLAIM_PATTERNS["attribution"].finditer(text):
         claims.append({"type": "attribution", "text": m.group(0), "pos": m.start()})
 
-    # 去重：相同文本只保留一次
+    # 去重 + 过滤股票代码（5位港股/6位A股纯数字不是可核查声明）
     seen = set()
     unique = []
     for c in claims:
         key = c["text"].strip()
         if key not in seen and len(key) > 2:
+            # 过滤纯数字股票代码：5位(港股)或6位(A股)
+            if key.isdigit() and len(key) in (5, 6):
+                continue
             seen.add(key)
             unique.append(c)
 

@@ -3,6 +3,7 @@ core/data_layer.py
 Real data sources: AKShare (A-share, HK) + yfinance (US)
 With graceful fallback to mock data when sources fail
 """
+import os
 import random
 import re
 from datetime import datetime, timedelta
@@ -52,6 +53,11 @@ class DataLayer:
         self._yf = None
         self._cache = {}
         self._mock_sources: set = set()
+        if not os.environ.get("NO_PROXY"):
+            import logging
+            logging.getLogger(__name__).warning(
+                "NO_PROXY 未设置，akshare 可能走代理导致失败"
+            )
 
     def clear_mock_sources(self):
         self._mock_sources.clear()

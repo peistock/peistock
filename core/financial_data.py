@@ -38,20 +38,154 @@ def _mock_financial_summary(code: str) -> str:
     )
 
 
+def _get_hk_financial_summary(code: str) -> Optional[str]:
+    """
+    获取港股最新财报核心指标。
+    合并两个数据源：
+    1. stock_hk_financial_indicator_em: 最新滚动财务指标（实时更新，可能包含季报）
+    2. stock_financial_hk_analysis_indicator_em: 历史完整报告（年报/半年报），有报告期和同比
+    """
+    try:
+        import akshare as ak
+    except ImportError:
+        return None
+
+    # 数据源1: 最新滚动指标（可能包含季报）
+    latest = None
+    try:
+        df = ak.stock_hk_financial_indicator_em(symbol=code)
+        if df is not None and not df.empty:
+            latest = df.iloc[0]
+    except Exception:
+        pass
+
+    # 数据源2: 历史完整报告（年报/半年报）
+    hist = None
+    try:
+        df = ak.stock_financial_hk_analysis_indicator_em(symbol=code)
+        if df is not None and not df.empty:
+            df = df.sort_values("REPORT_DATE", ascending=False)
+            hist = df.iloc[0]
+    except Exception:
+        pass
+
+    if latest is None and hist is None:
+        return None
+
+    lines = [f"【财报核心指标 · {code} · 最新可用数据】", ""]
+
+    # 优先展示最新滚动指标（让 AI 看到可能已经包含最新季报）
+    if latest is not None:
+        revenue = float(latest.get("营业总收入", 0) or 0)
+        profit = float(latest.get("净利润", 0) or 0)
+        revenue_yi = round(revenue / 1e8, 2) if revenue else 0
+        profit_yi = round(profit / 1e8, 2) if profit else 0
+        revenue_qoq = float(latest.get("营业总收入滚动环比增长(%)", 0) or 0)
+        profit_qoq = float(latest.get("净利润滚动环比增长(%)", 0) or 0)
+        eps = float(latest.get("基本每股收益(元)", 0) or 0)
+        bps = float(latest.get("每股净资产(元)", 0) or 0)
+        roe = float(latest.get("股东权益回报率(%)", 0) or 0)
+        net_margin = float(latest.get("销售净利率(%)", 0) or 0)
+        pe = float(latest.get("市盈率", 0) or 0)
+        pb = float(latest.get("市净率", 0) or 0)
+
+        lines.append("**最新滚动财务指标（可能已包含最新季报）：**")
+        lines.append("")
+        lines.append("| 指标 | 数值 | 环比 |")
+        lines.append("|------|------|------|")
+        lines.append(f"| 营业总收入 | {revenue_yi:.2f} 亿元 | {revenue_qoq:+.2f}% |")
+        lines.append(f"| 净利润 | {profit_yi:.2f} 亿元 | {profit_qoq:+.2f}% |")
+        lines.append(f"| 每股收益 | {eps:.2f} 元 | — |")
+        lines.append(f"| 每股净资产 | {bps:.2f} 元 | — |")
+        lines.append(f"| 净资产收益率(ROE) | {roe:.2f}% | — |")
+        lines.append(f"| 销售净利率 | {net_margin:.2f}% | — |")
+        if pe:
+            lines.append(f"| 市盈率 | {pe:.2f} | — |")
+        if pb:
+            lines.append(f"| 市净率 | {pb:.2f} | — |")
+        lines.append("")
+        lines.append("> 注：以上数据来自东方财富港股实时财务指标，为滚动更新的最新值。")
+        lines.append("")
+
+    # 补充历史完整报告期数据（提供同比基准）
+    if hist is not None:
+        report_date = str(hist.get("REPORT_DATE", ""))[:10]
+        fiscal_year = str(hist.get("FISCAL_YEAR", ""))
+        eps = float(hist.get("BASIC_EPS", 0) or 0)
+        bps = float(hist.get("BPS", 0) or 0)
+        roe = float(hist.get("ROE_AVG", 0) or 0)
+        roa = float(hist.get("ROA", 0) or 0)
+        gross_margin = float(hist.get("GROSS_PROFIT_RATIO", 0) or 0)
+        net_margin = float(hist.get("NET_PROFIT_RATIO", 0) or 0)
+        revenue = float(hist.get("OPERATE_INCOME", 0) or 0)
+        revenue_yoy = float(hist.get("OPERATE_INCOME_YOY", 0) or 0)
+        profit = float(hist.get("HOLDER_PROFIT", 0) or 0)
+        profit_yoy = float(hist.get("HOLDER_PROFIT_YOY", 0) or 0)
+        revenue_yi = round(revenue / 1e8, 2) if revenue else 0
+        profit_yi = round(profit / 1e8, 2) if profit else 0
+
+        month_day = report_date[5:10]
+        if month_day == "12-31":
+            period_label = "年报"
+        elif month_day == "06-30":
+            period_label = "半年报"
+        else:
+            period_label = f"报告期({month_day})"
+
+        lines.append(f"**最近完整财报（{fiscal_year}{period_label}，公告日 {report_date}）：**")
+        lines.append("")
+        lines.append("| 指标 | 数值 | 同比 |")
+        lines.append("|------|------|------|")
+        lines.append(f"| 营业总收入 | {revenue_yi:.2f} 亿元 | {revenue_yoy:+.2f}% |")
+        lines.append(f"| 净利润 | {profit_yi:.2f} 亿元 | {profit_yoy:+.2f}% |")
+        lines.append(f"| 每股收益 | {eps:.2f} 元 | — |")
+        lines.append(f"| 每股净资产 | {bps:.2f} 元 | — |")
+        lines.append(f"| 净资产收益率(ROE) | {roe:.2f}% | — |")
+        lines.append(f"| 销售毛利率 | {gross_margin:.2f}% | — |")
+        lines.append(f"| 销售净利率 | {net_margin:.2f}% | — |")
+        lines.append(f"| 总资产回报率(ROA) | {roa:.2f}% | — |")
+        lines.append("")
+
+        notes = []
+        if profit_yoy > 30:
+            notes.append(f"净利润同比高增 {profit_yoy:+.2f}%，盈利动能强劲。")
+        elif profit_yoy < 0:
+            notes.append(f"净利润同比负增长 {profit_yoy:.2f}%，盈利承压。")
+        if revenue_yoy > 30:
+            notes.append(f"营收同比高增 {revenue_yoy:+.2f}%，规模扩张迅速。")
+        elif revenue_yoy < 0:
+            notes.append(f"营收同比负增长 {revenue_yoy:.2f}%，收入萎缩。")
+        if gross_margin > 40:
+            notes.append(f"毛利率 {gross_margin:.2f}% 处于较高水平。")
+        elif gross_margin < 15:
+            notes.append(f"毛利率 {gross_margin:.2f}% 偏低，盈利空间薄。")
+
+        if notes:
+            lines.append("速判：")
+            for note in notes:
+                lines.append(f"- {note}")
+            lines.append("")
+
+        lines.append(f"增速摘要：营收同比增速 {revenue_yoy:+.2f}%，净利润同比增速 {profit_yoy:+.2f}%。")
+        lines.append("")
+
+    lines.append("数据来源：[已发布财报 + 实时滚动指标] 东方财富港股财务指标")
+    return "\n".join(lines)
+
+
 def get_quarterly_financial_summary(code: str, market: str = "a") -> Optional[str]:
     """
     获取个股最新季度财报核心指标，返回 Markdown 格式化字符串。
 
     Args:
         code: 股票代码（A股6位，HK股5位）
-        market: 'a' 或 'hk'，当前仅支持 A 股
+        market: 'a' 或 'hk'
 
     Returns:
         Markdown 格式化字符串，可直接注入 prompt；失败返回 None
     """
-    if market != "a":
-        # HK 暂不实现，返回 mock 占位
-        return _mock_financial_summary(code)
+    if market == "hk":
+        return _get_hk_financial_summary(code)
 
     try:
         import akshare as ak
@@ -297,28 +431,90 @@ def extract_announce_date(fin_md: str) -> Optional[str]:
     return None
 
 
+def _get_hk_historical_growth_trend(code: str) -> Optional[str]:
+    """
+    基于 akshare 港股财务指标计算最近 N 个报告期的营收/净利润同比增速均值。
+    """
+    try:
+        import akshare as ak
+    except ImportError:
+        return None
+
+    try:
+        df = ak.stock_financial_hk_analysis_indicator_em(symbol=code)
+        if df is None or df.empty:
+            return None
+
+        df = df.sort_values("REPORT_DATE", ascending=False)
+        revenue_yoy_list = []
+        profit_yoy_list = []
+
+        for _, r in df.head(4).iterrows():
+            rev_yoy = float(r.get("OPERATE_INCOME_YOY", 0) or 0)
+            profit_yoy = float(r.get("HOLDER_PROFIT_YOY", 0) or 0)
+            if rev_yoy != 0:
+                revenue_yoy_list.append(rev_yoy)
+            if profit_yoy != 0:
+                profit_yoy_list.append(profit_yoy)
+
+        if len(revenue_yoy_list) < 2:
+            return None
+
+        avg_rev_yoy = sum(revenue_yoy_list) / len(revenue_yoy_list)
+        avg_profit_yoy = sum(profit_yoy_list) / len(profit_yoy_list) if profit_yoy_list else 0
+
+        lines = [
+            f"【港股历史增速趋势 · {code} · 最近 {len(revenue_yoy_list)} 个报告期均值】",
+            f"",
+            f"| 指标 | 均值 | 各期数值 |",
+            f"|------|------|-----------|",
+            f"| 营收同比增速 | {avg_rev_yoy:+.2f}% | {', '.join(f'{v:+.1f}%' for v in revenue_yoy_list)} |",
+        ]
+        if profit_yoy_list:
+            lines.append(f"| 净利润同比增速 | {avg_profit_yoy:+.2f}% | {', '.join(f'{v:+.1f}%' for v in profit_yoy_list)} |")
+
+        lines.append("")
+        if avg_rev_yoy > 20 and avg_profit_yoy > 20:
+            lines.append(f"趋势判断：高双位数增长，市场隐含预期偏乐观（营收+{avg_rev_yoy:.1f}%，净利润+{avg_profit_yoy:.1f}%）。")
+        elif avg_rev_yoy > 0 and avg_profit_yoy > 0:
+            lines.append(f"趋势判断：正增长，市场隐含预期温和（营收+{avg_rev_yoy:.1f}%，净利润+{avg_profit_yoy:.1f}%）。")
+        elif avg_rev_yoy < 0 or avg_profit_yoy < 0:
+            lines.append(f"趋势判断：增速下行，市场隐含预期偏保守（营收{avg_rev_yoy:+.1f}%，净利润{avg_profit_yoy:+.1f}%）。")
+        else:
+            lines.append(f"趋势判断：增速趋零，市场隐含预期中性（营收{avg_rev_yoy:+.1f}%，净利润{avg_profit_yoy:+.1f}%）。")
+
+        lines.append("")
+        lines.append("数据来源：[历史财报] 东方财富港股财务指标")
+        lines.append("置信度：中（基于历史外推，非机构一致预期）")
+        return "\n".join(lines)
+
+    except Exception:
+        return None
+
+
 def get_expectation_for_stock(code: str, market: str = "a") -> str:
     """
     获取个股预期基准数据，用于 Preemption 量化预期差。
 
     优先级：
     1. 业绩预告（公司官方预告，权威性最高，但覆盖率低）
-    2. 历史增速均值（基于最近4个季度财报计算，always available）
+    2. 历史增速均值（基于最近4个季度/报告期财报计算，always available）
 
     返回 Markdown 格式化字符串，可直接注入 prompt。
     """
-    if market != "a":
-        return _mock_expectation(code)
-
     sections = []
 
-    # 1. 尝试获取业绩预告
-    forecast = get_profit_forecast_summary(code)
-    if forecast:
-        sections.append(forecast)
+    # 1. 尝试获取业绩预告（仅 A 股）
+    if market == "a":
+        forecast = get_profit_forecast_summary(code)
+        if forecast:
+            sections.append(forecast)
 
     # 2. 历史增速均值（兜底，always try）
-    historical = get_historical_growth_trend(code)
+    if market == "a":
+        historical = get_historical_growth_trend(code)
+    else:
+        historical = _get_hk_historical_growth_trend(code)
     if historical:
         sections.append(historical)
 

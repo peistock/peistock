@@ -51,6 +51,14 @@ def _init_db():
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_date ON validated_decisions(decision_date)
     """)
+    # 列迁移：兼容已有数据库（新增字段不会丢数据）
+    cursor = conn.execute("PRAGMA table_info(validated_decisions)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "macro_industry_score" not in columns:
+        conn.execute("ALTER TABLE validated_decisions ADD COLUMN macro_industry_score REAL")
+    if "weighted_score" not in columns:
+        conn.execute("ALTER TABLE validated_decisions ADD COLUMN weighted_score REAL")
+
     conn.commit()
     conn.close()
 
@@ -169,6 +177,12 @@ def validate_pending_decisions(decisions_dir: str = "data/stock_decisions") -> D
         else:
             ticker = code.upper()
 
+        # 过滤 mock 价格：决策卡若当时走 mock 路径，price 可能是 30.0(A/HK) 或 100.0(US)
+        raw_price = card.get("price")
+        entry_price = None
+        if raw_price and float(raw_price) not in (30.0, 100.0):
+            entry_price = float(raw_price)
+
         try:
             trade = engine.run_trade(
                 entry_date=decision_date,
@@ -178,10 +192,12 @@ def validate_pending_decisions(decisions_dir: str = "data/stock_decisions") -> D
                 kill_switch=card.get("kill_switch", ""),
                 holding_period=card.get("holding_period", "T+5"),
                 thesis=card.get("thesis", ""),
-                entry_price=card.get("price"),
+                entry_price=entry_price,
                 bull_confidence=card.get("bull_confidence"),
                 bear_confidence=card.get("bear_confidence"),
                 preemption_score=card.get("preemption_score"),
+                macro_industry_score=card.get("macro_industry_score"),
+                weighted_score=card.get("weighted_score"),
             )
             if trade:
                 conn.execute("""
@@ -189,16 +205,18 @@ def validate_pending_decisions(decisions_dir: str = "data/stock_decisions") -> D
                     (code, decision_date, decision, conviction, entry_price,
                      exit_price, actual_pnl, holding_days, hit_kill_switch,
                      validated_at, bull_confidence, bear_confidence,
-                     preemption_score, sentiment_rating, kill_switch, holding_period)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     preemption_score, macro_industry_score, weighted_score,
+                     sentiment_rating, kill_switch, holding_period)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     code, decision_date, trade.decision, trade.conviction,
                     trade.entry_price, trade.exit_price, trade.pnl_pct,
                     trade.holding_period, 1 if trade.hit_kill_switch else 0,
                     datetime.now().isoformat(),
                     trade.bull_confidence, trade.bear_confidence,
-                    trade.preemption_score,
-                    card.get("sentiment_rating"),  # 决策卡中可能没有，预留
+                    trade.preemption_score, trade.macro_industry_score,
+                    trade.weighted_score,
+                    card.get("sentiment_rating"),
                     str(card.get("kill_switch", "")),
                     str(card.get("holding_period", "")),
                 ))

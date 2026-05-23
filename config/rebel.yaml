@@ -22,6 +22,10 @@ confidence_decay:
   technical: 0.60
   min_confidence: 30
 
+debate:
+  enabled: true
+  max_rounds: 1
+
 analysts:
   bull:
     system_prompt: |
@@ -50,3 +54,9 @@ analysts:
         - confidence: integer 0-100
         - trigger_condition: condition that confirms thesis
         - max_loss: e.g. "-10%"
+
+risk_manager:
+  enabled: true
+  volatility_threshold: 0.04   # 20日历史波动率阈值（4%）
+  high_threshold: 70           # 总风险分 >=70 → HIGH
+  medium_threshold: 40         # 总风险分 >=40 → MEDIUM
