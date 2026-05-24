@@ -3,19 +3,12 @@
  * 通过 peistock api-server 代理到 Python 后端
  */
 
-import { getAuthHeaders } from './auth';
-
 const API_BASE = import.meta.env.VITE_RESEARCH_API_BASE || '/api/research';
 
 async function fetchJSON(path: string, options?: RequestInit) {
-  const authHeaders = getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
     ...options,
-    headers: {
-      ...authHeaders,
-      ...(options?.headers || {}),
-    },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -163,21 +156,4 @@ export interface SignalBacktestResponse {
 /** 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 */
 export async function getSignalBacktest(code: string): Promise<SignalBacktestResponse> {
   return fetchJSON(`/backtest/signals/${code}?_t=${Date.now()}`);
-}
-
-/** 从后端拉取股票池（需登录） */
-export async function fetchWatchlist(): Promise<{ stocks: { code: string; name: string; market: string; category: string; star?: boolean }[]; categories: string[] }> {
-  return fetchJSON(`/watchlist`);
-}
-
-/** 向后端保存股票池（需登录） */
-export async function saveWatchlist(
-  stocks: { code: string; name: string; market: string; category: string; star?: boolean }[],
-  categories: string[],
-): Promise<{ status: string; saved: boolean }> {
-  return fetchJSON(`/watchlist`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stocks, categories }),
-  });
 }

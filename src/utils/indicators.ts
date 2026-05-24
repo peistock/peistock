@@ -1044,6 +1044,20 @@ export function calculateAllIndicators(
   const ma99 = calculateSMA(closes, 99);
   const ma128 = calculateSMA(closes, 128);
   const ma225 = calculateSMA(closes, 225);
+
+  // 6.5 计算布林带上下轨（中轨=MA20，不重复）
+  const bollUpper: (number | null)[] = new Array(stockData.length).fill(null);
+  const bollLower: (number | null)[] = new Array(stockData.length).fill(null);
+  for (let i = 19; i < stockData.length; i++) {
+    if (ma20[i] === null) continue;
+    let sqSum = 0;
+    for (let j = i - 19; j <= i; j++) {
+      sqSum += (closes[j] - ma20[i]!) ** 2;
+    }
+    const std = Math.sqrt(sqSum / 20);
+    bollUpper[i] = ma20[i]! + 2 * std;
+    bollLower[i] = ma20[i]! - 2 * std;
+  }
   
   // 7. 计算乖离率
   const bias5 = calculateBIAS(closes, ma5);
@@ -1205,6 +1219,8 @@ export function calculateAllIndicators(
     ma99: ma99[i],
     ma128: ma128[i],
     ma225: ma225[i],
+    bollUpper: bollUpper[i],
+    bollLower: bollLower[i],
     // 乖离率
     bias5: bias5[i],
     bias20: bias20[i],

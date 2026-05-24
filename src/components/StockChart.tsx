@@ -79,6 +79,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     const ma99Data = indicators.map(d => d.ma99);
     const ma128Data = indicators.map(d => d.ma128);
     const ma225Data = indicators.map(d => d.ma225);
+    const bollUpperData = indicators.map(d => d.bollUpper);
+    const bollLowerData = indicators.map(d => d.bollLower);
     const mahsData = indicators.map(d => d.mahs);
     const emahsData = indicators.map(d => d.emahs);
     const criData = indicators.map(d => d.cri);
@@ -796,6 +798,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         { name: 'MA99', type: 'line', data: ma99Data, smooth: true, lineStyle: { width: 1, color: '#D2A8FF' }, symbol: 'none' },
         { name: 'MA128', type: 'line', data: ma128Data, smooth: true, lineStyle: { width: 1, color: '#03B172' }, symbol: 'none' },
         { name: 'MA225', type: 'line', data: ma225Data, smooth: true, lineStyle: { width: 1, color: '#FF3435' }, symbol: 'none' },
+        { name: 'BOLL上', type: 'line', data: bollUpperData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
+        { name: 'BOLL下', type: 'line', data: bollLowerData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
       );
     }
 

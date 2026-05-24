@@ -12,35 +12,13 @@ import type { StockData } from '@/types';
  * @param klt K线类型 (101=日线, 15=15分钟, 120=120分钟)
  * @param limit 数据条数
  */
-export async function getKlines(
-  symbol: string,
-  klt: number,
-  limit: number = 500
-): Promise<StockData[]> {
-  // 转换代码格式
-  const secid = convertToSecid(symbol);
-  
-  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=${klt}&fqt=0&end=20500101&lmt=${limit}`;
-  
-  
-  const response = await fetch(url);
-  
-  if (!response.ok) {
-    throw new Error(`获取K线数据失败: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  
+const RESEARCH_API_BASE = import.meta.env.VITE_RESEARCH_API_BASE || '/api/research';
+
+function parseKlines(data: any, isHK: boolean): StockData[] {
   if (!data.data || !data.data.klines || data.data.klines.length === 0) {
     throw new Error('无数据返回，请检查股票代码');
   }
-  
-  // 解析K线数据
-  // 格式: "2024-01-01,100.00,101.00,99.00,100.50,10000,500000,0.50,0.00,0.00"
-  // 日期,开盘,收盘,最低,最高,成交量(手),成交额(元),振幅,涨跌幅,涨跌额,换手率
-  const isHK = secid.startsWith('116.');
-  
-  const result = data.data.klines.map((line: string) => {
+  return data.data.klines.map((line: string) => {
     const parts = line.split(',');
     return {
       date: parts[0],
@@ -53,8 +31,39 @@ export async function getKlines(
       amount: parseFloat(parts[6]),
     };
   });
-  
-  return result;
+}
+
+export async function getKlines(
+  symbol: string,
+  klt: number,
+  limit: number = 500
+): Promise<StockData[]> {
+  const secid = convertToSecid(symbol);
+  const isHK = secid.startsWith('116.');
+
+  // 优先走后端代理，规避浏览器 CORS/限流风险
+  try {
+    const proxyUrl = `${RESEARCH_API_BASE}/proxy/klines?symbol=${encodeURIComponent(symbol)}&klt=${klt}&limit=${limit}`;
+    const proxyRes = await fetch(proxyUrl);
+    if (proxyRes.ok) {
+      const data = await proxyRes.json();
+      if (data.data && data.data.klines && data.data.klines.length > 0) {
+        return parseKlines(data, isHK);
+      }
+    }
+  } catch {
+    // 代理失败，降级直连东方财富
+  }
+
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=${klt}&fqt=0&end=20500101&lmt=${limit}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`获取K线数据失败: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return parseKlines(data, isHK);
 }
 
 /**

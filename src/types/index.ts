@@ -50,6 +50,9 @@ export interface IndicatorData {
   ma99: number | null;
   ma128: number | null;
   ma225: number | null;
+  // 布林带（上轨/下轨，中轨即MA20不重复存储）
+  bollUpper: number | null;
+  bollLower: number | null;
   // 乖离率
   bias5: number | null;
   bias20: number | null;
