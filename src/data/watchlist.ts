@@ -1,8 +1,11 @@
-// 股票池数据层（localStorage 持久化）
+// 股票池数据层（localStorage + 后端同步）
 // 设计原则：
 // - 硬编码 WATCHLIST 作为默认初始数据
-// - 所有读写走 localStorage，支持轻量账户隔离
+// - 未登录时走 localStorage
+// - 登录后：初始化时从后端拉取，修改时同步到后端
 // - 旧收藏（peter_stock_favorites）自动迁移到股票池
+
+import { isLoggedIn, getAuth } from '@/utils/auth';
 
 export interface StockItem {
   code: string;
@@ -21,20 +24,42 @@ const DEFAULT_CATEGORIES = [
   '通信石油', 'ETF/其他', '其他',
 ];
 
-let _accountName = '';
-
-/** 设置账户名（预留多人隔离） */
-export function setAccountName(name: string) {
-  _accountName = name;
-}
-
-/** 获取当前账户名 */
-export function getAccountName(): string {
-  return _accountName;
-}
-
 function _key(): string {
-  return _accountName ? `${_accountName}_${STORAGE_KEY}` : STORAGE_KEY;
+  const auth = getAuth();
+  if (auth?.account) {
+    return `${auth.account}_${STORAGE_KEY}`;
+  }
+  return STORAGE_KEY;
+}
+
+/** 从后端拉取股票池并覆盖本地（登录状态下） */
+export async function loadWatchlistFromBackend(): Promise<void> {
+  if (!isLoggedIn()) return;
+  try {
+    const { fetchWatchlist } = await import('@/utils/researchApi');
+    const data = await fetchWatchlist();
+    if (data.stocks && data.stocks.length > 0) {
+      localStorage.setItem(_key(), JSON.stringify(data.stocks));
+    }
+    if (data.categories && data.categories.length > 0) {
+      localStorage.setItem(`${_key()}_categories`, JSON.stringify(data.categories));
+    }
+  } catch (e) {
+    console.warn('从后端拉取股票池失败:', e);
+  }
+}
+
+/** 同步当前本地股票池到后端（登录状态下，静默失败） */
+async function _syncToBackend(): Promise<void> {
+  if (!isLoggedIn()) return;
+  try {
+    const { saveWatchlist } = await import('@/utils/researchApi');
+    const pool = getStockPool();
+    const cats = getCategories();
+    await saveWatchlist(pool, cats);
+  } catch (e) {
+    console.warn('同步股票池到后端失败:', e);
+  }
 }
 
 // ── 默认初始数据 ───────────────────────────────────────────────────────────
@@ -212,9 +237,10 @@ export function getStockPool(): StockItem[] {
   return [...DEFAULT_WATCHLIST];
 }
 
-/** 写入 localStorage */
+/** 写入 localStorage 并同步到后端（登录状态下） */
 export function saveStockPool(items: StockItem[]) {
   localStorage.setItem(_key(), JSON.stringify(items));
+  _syncToBackend();
 }
 
 /** 添加股票（去重），返回是否成功 */
@@ -299,6 +325,7 @@ export function getCategories(): string[] {
 
 function _saveCategories(cats: string[]) {
   localStorage.setItem(`${_key()}_categories`, JSON.stringify(cats));
+  _syncToBackend();
 }
 
 /** 添加分类 */

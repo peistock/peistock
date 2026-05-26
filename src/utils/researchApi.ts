@@ -3,11 +3,18 @@
  * 通过 peistock api-server 代理到 Python 后端
  */
 
+import { getAuthHeaders } from './auth';
+
 const API_BASE = import.meta.env.VITE_RESEARCH_API_BASE || '/api/research';
 
 async function fetchJSON(path: string, options?: RequestInit) {
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
+    headers: {
+      ...authHeaders,
+      ...(options?.headers || {}),
+    },
     ...options,
   });
   if (!res.ok) {
@@ -156,4 +163,51 @@ export interface SignalBacktestResponse {
 /** 信号级回测：逐日 B/S 信号持有统计 + 当前条件最相似历史日期回测 */
 export async function getSignalBacktest(code: string): Promise<SignalBacktestResponse> {
   return fetchJSON(`/backtest/signals/${code}?_t=${Date.now()}`);
+}
+
+/** 估值分析报告列表（按股票代码分组） */
+export async function getAnalysisList() {
+  return fetchJSON('/analysis/list?_t=' + Date.now());
+}
+
+/** 某股票的估值分析报告内容 */
+export async function getAnalysisByCode(code: string, type?: string) {
+  const q = type ? `?type=${encodeURIComponent(type)}&_t=${Date.now()}` : `?_t=${Date.now()}`;
+  return fetchJSON(`/analysis/${code}${q}`);
+}
+
+/** 获取后端股票池（需登录） */
+export async function fetchWatchlist() {
+  return fetchJSON('/watchlist');
+}
+
+/** 保存股票池到后端（需登录） */
+export async function saveWatchlist(stocks: any[], categories: string[]) {
+  return fetchJSON('/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stocks, categories }),
+  });
+}
+
+export interface AnalysisReportItem {
+  filename: string;
+  type: string;
+  updated_at: string;
+  size: number;
+}
+
+export interface AnalysisReport {
+  filename: string;
+  type: string;
+  title: string;
+  updated_at: string;
+  content: string;
+  content_type: 'html' | 'markdown';
+}
+
+export interface AnalysisByCodeResponse {
+  code: string;
+  reports: AnalysisReport[];
+  count: number;
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { AlertCircle, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History, BarChart2 } from 'lucide-react';
+import { AlertCircle, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History, BarChart2, User, LogOut, BookMarked } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockPool from './components/StockPool';
 
@@ -12,9 +12,11 @@ import { getReportHistory } from './utils/researchApi';
 import ReportHistory from './components/ReportHistory';
 import BacktestPanel from './components/BacktestPanel';
 import SignalBacktestPanel from './components/SignalBacktestPanel';
+import ValuationReportPanel from './components/ValuationReportPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
-import { getStockPool, addToStockPool, migrateLegacyFavorites } from './data/watchlist';
+import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend } from './data/watchlist';
+import { getAuth, setAuth, clearAuth, isLoggedIn } from './utils/auth';
 
 function App() {
   const stockData = useStockData();
@@ -25,6 +27,9 @@ function App() {
   const [historyData, setHistoryData] = useState<ReportHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // AI研究面板 Tab: 'ai' | 'valuation'
+  const [researchTab, setResearchTab] = useState<'ai' | 'valuation'>('ai');
+
   // 股票池（localStorage 持久化）
   const [stockPool, setStockPool] = useState<StockItem[]>(() => {
     if (typeof window !== 'undefined') {
@@ -34,9 +39,51 @@ function App() {
     return [];
   });
 
+  // 账号系统
+  const [authAccount, setAuthAccount] = useState<string>(getAuth()?.account || '');
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginInput, setLoginInput] = useState({ account: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+
   const refreshPool = useCallback(() => {
     setStockPool(getStockPool());
   }, []);
+
+  // 登录状态下，从后端同步股票池
+  useEffect(() => {
+    if (isLoggedIn()) {
+      loadWatchlistFromBackend().then(() => {
+        refreshPool();
+      });
+    }
+  }, []);
+
+  const handleLogin = async () => {
+    setLoginError('');
+    if (!loginInput.account.trim() || !loginInput.password.trim()) {
+      setLoginError('请输入账号和密码');
+      return;
+    }
+    setAuth(loginInput.account.trim(), loginInput.password.trim());
+    try {
+      const { fetchWatchlist } = await import('./utils/researchApi');
+      await fetchWatchlist();
+      setAuthAccount(loginInput.account.trim());
+      setShowLoginModal(false);
+      setLoginInput({ account: '', password: '' });
+      await loadWatchlistFromBackend();
+      refreshPool();
+    } catch (e: any) {
+      clearAuth();
+      setLoginError(e.message?.includes('401') ? '账号或密码错误' : '登录失败，请检查后端服务');
+    }
+  };
+
+  const handleLogout = () => {
+    clearAuth();
+    setAuthAccount('');
+    refreshPool();
+  };
 
   const inPool = stockData.stockInfo ? stockPool.some(s => s.code === stockData.stockInfo!.symbol) : false;
 
@@ -116,11 +163,11 @@ function App() {
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               {/* 数据源选择器 */}
               <div className="relative" data-datasource-dropdown>
-                <button 
+                <button
                   onClick={() => stockData.setShowDataSourceDropdown(!stockData.showDataSourceDropdown)}
                   className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors"
                 >
@@ -128,7 +175,7 @@ function App() {
                   {stockData.dataSource ==='auto' ? '自动' : stockData.dataSource ==='eastmoney' ? '东方财富' : '腾讯'}
                   <ChevronDown className="w-3 h-3" />
                 </button>
-                
+
                 {stockData.showDataSourceDropdown && (
                   <div className="absolute right-0 top-full mt-2 w-40 bg-[#161B22] border border-[#30363D] rounded-lg shadow-xl z-50">
                     <div className="p-2">
@@ -166,7 +213,7 @@ function App() {
                   </div>
                 )}
               </div>
-              
+
               <HelpDialog defaultTab="overview">
                 <button className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors">
                   <BookOpen className="w-4 h-4" />
@@ -179,6 +226,31 @@ function App() {
                   公式参考
                 </button>
               </HelpDialog>
+
+              {/* 账号登录 */}
+              {authAccount ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#8B949E]">
+                    <User className="w-3.5 h-3.5 inline mr-1" />
+                    {authAccount}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="text-[#8B949E] hover:text-[#FF3435] transition-colors"
+                    title="退出"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center gap-1 text-sm text-[#8B949E] hover:text-white transition-colors"
+                >
+                  <User className="w-4 h-4" />
+                  登录
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -263,7 +335,7 @@ function App() {
           />
         </section>
 
-        {/* 历史观点对比 */}
+        {/* AI 研究面板（AI分析 + 估值报告 Tab 切换） */}
         {stockData.stockInfo && (
           <section className="mb-6">
             <div className="bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden">
@@ -279,7 +351,7 @@ function App() {
               >
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-[#D2A8FF]" />
-                  <span>历史观点对比</span>
+                  <span>AI 研究</span>
                   {historyData.length > 0 && (
                     <span className="text-xs text-[#8B949E]">
                       ({historyData.length} 次分析)
@@ -294,13 +366,43 @@ function App() {
               </button>
               {showHistory && (
                 <div className="px-4 py-3 border-t border-[#30363D]">
-                  {historyLoading ? (
-                    <div className="flex items-center justify-center py-8 gap-2 text-[#8B949E] text-sm">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      加载历史数据中...
-                    </div>
+                  {/* Tab 切换 */}
+                  <div className="flex gap-1 mb-3 p-1 bg-[#0D1117] rounded-lg border border-[#30363D]/60 w-fit">
+                    <button
+                      onClick={() => setResearchTab('ai')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        researchTab === 'ai'
+                          ? 'bg-[#30363D] text-white'
+                          : 'text-[#8B949E] hover:text-white'
+                      }`}
+                    >
+                      <BarChart2 className="w-3.5 h-3.5" />
+                      AI 分析
+                    </button>
+                    <button
+                      onClick={() => setResearchTab('valuation')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        researchTab === 'valuation'
+                          ? 'bg-[#30363D] text-white'
+                          : 'text-[#8B949E] hover:text-white'
+                      }`}
+                    >
+                      <BookMarked className="w-3.5 h-3.5" />
+                      估值报告
+                    </button>
+                  </div>
+
+                  {researchTab === 'ai' ? (
+                    historyLoading ? (
+                      <div className="flex items-center justify-center py-8 gap-2 text-[#8B949E] text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        加载历史数据中...
+                      </div>
+                    ) : (
+                      <ReportHistory data={historyData} />
+                    )
                   ) : (
-                    <ReportHistory data={historyData} />
+                    <ValuationReportPanel code={stockData.stockInfo.symbol} />
                   )}
                 </div>
               )}
@@ -346,15 +448,54 @@ function App() {
         {/* AI 决策验证（回测闭环） */}
         {stockData.stockInfo && (
           <section className="mb-6">
-            <BacktestPanel
-              code={stockData.stockInfo.symbol}
-              indicators={stockData.timeframeData.daily?.indicators}
-            />
+            <BacktestPanel code={stockData.stockInfo.symbol} />
           </section>
         )}
       </main>
 
       {/* Footer */}
+      {/* 登录弹窗 */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLoginModal(false)}>
+          <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-6 w-80" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4">账号登录</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[#8B949E] block mb-1">账号</label>
+                <input
+                  type="text"
+                  value={loginInput.account}
+                  onChange={e => setLoginInput(prev => ({ ...prev, account: e.target.value }))}
+                  className="w-full bg-[#0D1117] border border-[#30363D] rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58A6FF]"
+                  placeholder="输入账号"
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[#8B949E] block mb-1">密码</label>
+                <input
+                  type="password"
+                  value={loginInput.password}
+                  onChange={e => setLoginInput(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full bg-[#0D1117] border border-[#30363D] rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-[#58A6FF]"
+                  placeholder="输入密码"
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                />
+              </div>
+              {loginError && (
+                <p className="text-xs text-[#FF3435]">{loginError}</p>
+              )}
+              <button
+                onClick={handleLogin}
+                className="w-full py-2 rounded bg-[#58A6FF] hover:bg-[#58A6FF]/90 text-white text-sm font-medium transition-colors"
+              >
+                登录
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="border-t border-[#30363D] bg-[#161B22] mt-12">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
