@@ -7,6 +7,14 @@ interface CompanyHistoryPanelProps {
   code: string;
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  history: '公司深度研究',
+};
+
+function getTypeLabel(type: string): string {
+  return TYPE_LABELS[type] || type;
+}
+
 function FullscreenReport({ report, onClose }: { report: AnalysisReport; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
@@ -16,7 +24,7 @@ function FullscreenReport({ report, onClose }: { report: AnalysisReport; onClose
           <div className="flex items-center gap-2 min-w-0">
             <FileText className="w-4 h-4 text-[#333] shrink-0" />
             <span className="text-sm font-medium text-[#1a1a1a] truncate">
-              {report.title || '前世今生'}
+              {report.title || getTypeLabel(report.type) || '前世今生'}
             </span>
           </div>
           <button
@@ -107,7 +115,7 @@ export default function CompanyHistoryPanel({ code }: CompanyHistoryPanelProps) 
             <div className="flex items-center gap-2 min-w-0">
               <FileText className="w-3.5 h-3.5 text-[#E3B341] shrink-0" />
               <span className="text-[13px] text-[#C9D1D9] truncate">
-                {report.title || '前世今生'}
+                {report.title || getTypeLabel(report.type) || '前世今生'}
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
