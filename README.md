@@ -51,10 +51,21 @@ npm run build
 - 搜索股票触发五角色链分析（Bull / Bear / Preemption / Sentiment / Chair）
 - 结果以卡片轮播展示，支持章节导航
 - 3 天缓存：同一股票 3 天内已有 Chair 报告则直接返回
+- **Tab 切换**：AI 分析 与 估值报告 在同一面板切换展示
+
+### 估值报告
+- 读取 RebelResearchOS 后端 `analysis/` 目录中的本地估值报告
+- 支持 GROWTH-J 和 james 框架报告，优先展示 HTML 版本
+- 点击报告卡片弹出全屏阅读器（iframe 隔离样式）
 
 ### 历史报告对比
 - 日期为行，Bull / Bear / Preemption / Sentiment / Chair 为列
 - 支持点击展开完整报告
+
+### 账号管理
+- 静态账号体系：admin + guest1~guest5（密码同账号）
+- 登录后股票池按账号隔离（后端 `data/watchlists.json` + 前端 localStorage）
+- 未登录走纯 localStorage 模式
 
 ## 数据流
 
@@ -66,6 +77,8 @@ npm run build
   │              ├── 新闻/公告抓取
   │              ├── Bull vs Bear LLM 辩论
   │              └── Chair 裁决 → 决策卡 JSON
+  ├── 估值报告 → RebelResearchOS 后端 (/api/analysis)
+  │              └── 读取 analysis/ 目录中的 HTML/Markdown 报告
   └── 股票池 → 后端账号隔离存储 / localStorage
 ```
 
@@ -81,6 +94,7 @@ src/
 │   ├── StockChartsSection.tsx  多时间框架图表区
 │   ├── ReportHistory.tsx      历史 AI 报告对比表格
 │   ├── SignalBacktestPanel.tsx 信号级回测看板
+│   ├── ValuationReportPanel.tsx 估值报告面板（全屏阅读器）
 │   └── ...
 ├── data/
 │   └── watchlist.ts           股票池 localStorage CRUD

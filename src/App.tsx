@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { AlertCircle, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History, BarChart2, User, LogOut, BookMarked } from 'lucide-react';
+import { AlertCircle, BookOpen, Code2, X, Database, ChevronDown, ChevronUp, Loader2, History, BarChart2, User, LogOut, BookMarked, Timer } from 'lucide-react';
 import StockSearch from './components/StockSearch';
 import StockPool from './components/StockPool';
 
@@ -13,6 +13,7 @@ import ReportHistory from './components/ReportHistory';
 import BacktestPanel from './components/BacktestPanel';
 import SignalBacktestPanel from './components/SignalBacktestPanel';
 import ValuationReportPanel from './components/ValuationReportPanel';
+import CompanyHistoryPanel from './components/CompanyHistoryPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
 import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend } from './data/watchlist';
@@ -27,8 +28,8 @@ function App() {
   const [historyData, setHistoryData] = useState<ReportHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // AI研究面板 Tab: 'ai' | 'valuation'
-  const [researchTab, setResearchTab] = useState<'ai' | 'valuation'>('ai');
+  // AI研究面板 Tab: 'ai' | 'valuation' | 'history'
+  const [researchTab, setResearchTab] = useState<'ai' | 'valuation' | 'history'>('ai');
 
   // 股票池（localStorage 持久化）
   const [stockPool, setStockPool] = useState<StockItem[]>(() => {
@@ -390,6 +391,17 @@ function App() {
                       <BookMarked className="w-3.5 h-3.5" />
                       估值报告
                     </button>
+                    <button
+                      onClick={() => setResearchTab('history')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        researchTab === 'history'
+                          ? 'bg-[#30363D] text-white'
+                          : 'text-[#8B949E] hover:text-white'
+                      }`}
+                    >
+                      <Timer className="w-3.5 h-3.5" />
+                      前世今生
+                    </button>
                   </div>
 
                   {researchTab === 'ai' ? (
@@ -401,8 +413,10 @@ function App() {
                     ) : (
                       <ReportHistory data={historyData} />
                     )
-                  ) : (
+                  ) : researchTab === 'valuation' ? (
                     <ValuationReportPanel code={stockData.stockInfo.symbol} />
+                  ) : (
+                    <CompanyHistoryPanel code={stockData.stockInfo.symbol} />
                   )}
                 </div>
               )}
