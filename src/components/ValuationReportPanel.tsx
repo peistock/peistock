@@ -11,7 +11,7 @@ const TYPE_LABELS: Record<string, string> = {
   growth_j_analysis: 'GROWTH-J 标准版',
   growth_j_analysis_v2: 'GROWTH-J 冲突声明版',
   growth_j_analysis_v1_2: 'GROWTH-J v1.2',
-  james_framework_analysis: 'james 收息框架',
+  peter_framework_analysis: 'peter 收息框架',
   comparison: '框架对比',
 };
 
@@ -115,7 +115,7 @@ export default function ValuationReportPanel({ code }: ValuationReportPanelProps
       <div className="text-center py-6 text-[#8B949E] text-sm">
         <p>该股票暂无估值分析报告</p>
         <p className="text-xs mt-1 text-[#484F58]">
-          在本地运行 GROWTH-J 或 james 框架分析后，通过 deploy.sh 同步到服务器即可查看
+          在本地运行 GROWTH-J 或 peter 框架分析后，通过 deploy.sh 同步到服务器即可查看
         </p>
       </div>
     );

@@ -55,7 +55,7 @@ npm run build
 
 ### 估值报告
 - 读取 RebelResearchOS 后端 `analysis/` 目录中的本地估值报告
-- 支持 GROWTH-J 和 james 框架报告，优先展示 HTML 版本
+- 支持 GROWTH-J 和 peter 框架报告，优先展示 HTML 版本
 - 点击报告卡片弹出全屏阅读器（iframe 隔离样式）
 
 ### 历史报告对比
