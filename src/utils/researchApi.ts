@@ -135,7 +135,7 @@ export interface SignalBacktestItem {
 export interface SignalBacktestMatch {
   date: string;
   price: number;
-  cri_pct: number;
+  bias225_pct: number;
   cost_dev_pct: number;
   distance: number;
   max_gain: number;
@@ -147,7 +147,7 @@ export interface SignalBacktestData {
   code: string;
   current_price: number;
   latest_date: string;
-  latest_cri_pct: number;
+  latest_bias225_pct: number;
   latest_cost_dev_pct: number;
   signals: SignalBacktestItem[];
   current_match: SignalBacktestMatch | null;

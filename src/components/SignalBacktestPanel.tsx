@@ -7,7 +7,7 @@ interface SignalBacktestData {
   code: string;
   current_price: number;
   latest_date: string;
-  latest_cri_pct: number;
+  latest_bias225_pct: number;
   latest_cost_dev_pct: number;
   signals: SignalBacktestItem[];
   current_match: SignalBacktestMatch | null;
@@ -116,7 +116,7 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
           {data && (
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <span className="px-2 py-1 rounded text-[10px] bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20">
-                CRI 分位: {data.latest_cri_pct.toFixed(1)}%
+                乖离率(BIAS225)分位: {data.latest_bias225_pct.toFixed(1)}%
               </span>
               <span className="px-2 py-1 rounded text-[10px] bg-[#E3B341]/10 text-[#E3B341] border border-[#E3B341]/20">
                 成本偏离分位: {data.latest_cost_dev_pct.toFixed(1)}%
@@ -163,7 +163,7 @@ export default function SignalBacktestPanel({ code }: SignalBacktestPanelProps) 
                       匹配日: {data!.current_match.date}
                     </span>
                     <span className="px-2 py-1 rounded text-[10px] bg-[#0D1117] text-[#58A6FF] border border-[#30363D]/60">
-                      CRI: {data!.current_match.cri_pct.toFixed(1)}%
+                      乖离率: {data!.current_match.bias225_pct.toFixed(1)}%
                     </span>
                     <span className="px-2 py-1 rounded text-[10px] bg-[#0D1117] text-[#E3B341] border border-[#30363D]/60">
                       成本偏离: {data!.current_match.cost_dev_pct.toFixed(1)}%
