@@ -137,14 +137,17 @@ export default function StockPool({ pool, onPoolChange, onSelect }: StockPoolPro
           <span className="text-xs text-[#8B949E]">({total}只)</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <span
+            role="button"
+            tabIndex={0}
             onClick={(e) => { e.stopPropagation(); setShowAdd(!showAdd); }}
-            className="flex items-center gap-1 text-xs text-[#8B949E] hover:text-[#03B172] transition-colors px-2 py-1 rounded hover:bg-[#0D1117]"
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setShowAdd(!showAdd); }}}
+            className="flex items-center gap-1 text-xs text-[#8B949E] hover:text-[#03B172] transition-colors px-2 py-1 rounded hover:bg-[#0D1117] cursor-pointer"
             title="添加股票"
           >
             <Plus className="w-3.5 h-3.5" />
             添加
-          </button>
+          </span>
           {expanded ? (
             <ChevronUp className="w-4 h-4 text-[#8B949E]" />
           ) : (

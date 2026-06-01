@@ -36,6 +36,23 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
   const hasData = data.daily && data.weekly && data.min15;
   if (!hasData) return null;
 
+  // 防御：指标数组为空时跳过该维度，但不整体隐藏（避免网络波动导致全黑）
+  const hasAnyIndicators =
+    (data.daily?.indicators.length || 0) > 0 ||
+    (data.weekly?.indicators.length || 0) > 0 ||
+    (data.min15?.indicators.length || 0) > 0;
+  if (!hasAnyIndicators) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {chartConfigs.map((config) => (
+          <div key={config.key} className="bg-[#161B22] rounded-xl border border-[#30363D] p-8 text-center">
+            <div className="text-sm text-[#8B949E]">K线数据加载失败，请检查网络连接</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {chartConfigs.map((config) => {
@@ -44,6 +61,15 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
         const Icon = config.icon;
         const lastIndicator = tfData.indicators[tfData.indicators.length - 1];
         const prevIndicator = tfData.indicators[tfData.indicators.length - 2];
+
+        // 防御：该维度指标为空时显示占位
+        if (!lastIndicator) {
+          return (
+            <div key={tf} className="bg-[#161B22] rounded-xl border border-[#30363D] p-8 text-center">
+              <div className="text-sm text-[#8B949E]">{config.label} 数据加载失败</div>
+            </div>
+          );
+        }
 
         const buySignals: string[] = [];
         const sellSignals: string[] = [];

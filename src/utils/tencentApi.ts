@@ -1,4 +1,5 @@
 import type { StockData } from '@/types';
+import { getKlines as getEastmoneyKlines } from './eastmoneyApi';
 
 /**
  * 腾讯财经 API
@@ -184,18 +185,16 @@ export async function getMultiTimeframeData(symbol: string): Promise<{
   weekly: StockData[];
   min15: StockData[];
 }> {
-  // 腾讯 API 分钟线格式不同，这里用日线代替15分钟线
-  const [daily, weekly] = await Promise.all([
+  const [daily, weekly, min15] = await Promise.all([
     getKlines(symbol, 'day', 500).catch(() => []),
     getKlines(symbol, 'week', 200).catch(() => []),
+    getEastmoneyKlines(symbol, 15, 2000).catch(() => []),
   ]);
-  
-  // 腾讯分钟线需要另一个接口，这里暂时用日线数据代替
-  // 后续可以扩展 getMinKlines 方法
-  return { 
-    daily, 
-    weekly, 
-    min15: daily.slice(-100) // 临时用日线最后100条代替
+
+  return {
+    daily,
+    weekly,
+    min15,
   };
 }
 

@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Search, TrendingUp, TrendingDown, Database, Clock, Plus, Check, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Percent, Clock, Plus, Check, BarChart2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { formatCapital } from '@/utils/indicators';
+import { getDividendYield } from '@/utils/researchApi';
 
 interface StockSearchProps {
   onSearch: (symbol: string) => void;
@@ -52,6 +52,21 @@ const StockSearch = ({
   const [symbol, setSymbol] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [currentCard, setCurrentCard] = useState(0);
+  const [dividendYield, setDividendYield] = useState<number | null>(null);
+  const [dividendLoading, setDividendLoading] = useState(false);
+
+  // 股票变化时获取股息率
+  useEffect(() => {
+    if (stockInfo?.symbol) {
+      setDividendLoading(true);
+      getDividendYield(stockInfo.symbol)
+        .then((res) => setDividendYield(res.yield_rate))
+        .catch(() => setDividendYield(null))
+        .finally(() => setDividendLoading(false));
+    } else {
+      setDividendYield(null);
+    }
+  }, [stockInfo?.symbol]);
 
   // 报告按 ## 标题拆分为卡片
   const sections = useMemo(() => {
@@ -264,14 +279,20 @@ const StockSearch = ({
           )}
 
           <div className="flex items-center gap-6">
-            {/* 流通股本 */}
+            {/* 股息率 */}
             <div className="text-right">
               <div className="flex items-center gap-1 text-sm text-[#8B949E]">
-                <Database className="w-3 h-3" />
-                流通股本
+                <Percent className="w-3 h-3" />
+                股息率
               </div>
               <div className="text-lg font-bold text-[#D2A8FF]" style={{ fontFamily: 'JetBrains Mono' }}>
-                {formatCapital(stockInfo.capital)}
+                {dividendLoading ? (
+                  <span className="text-sm text-[#8B949E]">--</span>
+                ) : typeof dividendYield === 'number' ? (
+                  `${dividendYield.toFixed(2)}%`
+                ) : (
+                  <span className="text-sm text-[#8B949E]">--</span>
+                )}
               </div>
             </div>
             {/* 价格 */}
@@ -279,10 +300,10 @@ const StockSearch = ({
               <div className="text-3xl font-bold text-white" style={{ fontFamily: 'JetBrains Mono' }}>
                 ¥{stockInfo.price.toFixed(2)}
               </div>
-              <div className={`flex items-center gap-1 text-sm ${stockInfo.change >= 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}`}>
-                {stockInfo.change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              <div className={`flex items-center gap-1 text-sm ${stockInfo.changePercent >= 0 ? 'text-[#FF3435]' : 'text-[#03B172]'}`}>
+                {stockInfo.changePercent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                 <span style={{ fontFamily: 'JetBrains Mono' }}>
-                  {stockInfo.change >= 0 ? '+' : ''}{stockInfo.change.toFixed(2)}
+                  {stockInfo.changePercent >= 0 ? '+' : ''}{stockInfo.changePercent.toFixed(2)}%
                 </span>
               </div>
             </div>

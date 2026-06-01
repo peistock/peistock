@@ -211,3 +211,19 @@ export interface AnalysisByCodeResponse {
   reports: AnalysisReport[];
   count: number;
 }
+
+/** 股息率响应 */
+export interface DividendYieldResponse {
+  code: string;
+  name: string;
+  price: number;
+  yield_rate: number | null;
+  bonus_per_share: number;
+  recent_count: number;
+  error?: string;
+}
+
+/** 获取股息率（最近一年累计现金分红 / 当前股价） */
+export async function getDividendYield(code: string): Promise<DividendYieldResponse> {
+  return fetchJSON(`/dividend/${code}`);
+}
