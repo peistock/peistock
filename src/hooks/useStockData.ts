@@ -33,7 +33,7 @@ export function useStockData() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiSource, setApiSource] = useState<string>('');
-  const [dataSource, setDataSource] = useState<'auto' | 'eastmoney' | 'tencent'>('auto');
+  const [dataSource, setDataSource] = useState<'auto' | 'eastmoney' | 'tencent'>('tencent');
   const [showDataSourceDropdown, setShowDataSourceDropdown] = useState(false);
 
   // 点击外部关闭数据源下拉框
