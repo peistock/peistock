@@ -753,6 +753,31 @@ function calculateGreedyScore(
 }
 
 /**
+ * 计算换手OBV（能量潮指标）
+ * 以换手率替代成交量：收盘价上涨则累加换手率，下跌则累减换手率，持平不变
+ */
+export function calculateOBV(stockData: StockData[], capitalInShares: number): number[] {
+  const obv: number[] = [];
+  for (let i = 0; i < stockData.length; i++) {
+    const turnover = stockData[i].volume / capitalInShares;
+    if (i === 0) {
+      obv.push(turnover);
+    } else {
+      const prevClose = stockData[i - 1].close;
+      const currClose = stockData[i].close;
+      if (currClose > prevClose) {
+        obv.push(obv[i - 1] + turnover);
+      } else if (currClose < prevClose) {
+        obv.push(obv[i - 1] - turnover);
+      } else {
+        obv.push(obv[i - 1]);
+      }
+    }
+  }
+  return obv;
+}
+
+/**
  * 计算简单移动平均 SMA
  */
 export function calculateSMA(data: number[], period: number): (number | null)[] {
@@ -1177,7 +1202,11 @@ export function calculateAllIndicators(
   
   // 17. 计算PVT（价量趋势指标）
   const { pvt, pvtDivergence, pvtTrend } = calculatePVT(stockData, bias225, costDiff, 20);
-  
+
+  // 18. 计算OBV（能量潮指标，基于换手率）
+  const obv = calculateOBV(stockData, capitalInShares);
+  const obvMa20 = calculateSMA(obv, 20);
+
   return stockData.map((d, i) => ({
     date: d.date,
     close: d.close,
@@ -1249,6 +1278,9 @@ export function calculateAllIndicators(
     pvt: pvt[i],
     pvtDivergence: pvtDivergence[i],
     pvtTrend: pvtTrend[i],
+    // OBV能量潮
+    obv: obv[i],
+    obvMa20: obvMa20[i],
   }));
 }
 

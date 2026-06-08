@@ -8,13 +8,15 @@ interface StockChartProps {
   showMAHS: boolean;
   showEMAHS: boolean;
   showMA: boolean;
+  showVolumeTrend?: boolean;
+  showOBV?: boolean;
   title?: string;
   compact?: boolean;
   timeframe?: 'daily' | 'weekly' | 'min15';
   version?: 'strict' | 'loose'; // 严格版/宽松版
 }
 
-const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
+const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showOBV, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
   // 低频BS阈值（固定）
   const LOW_FREQ_BUY = { costDev: 5, bias: 5, cri: 90 };
   const LOW_FREQ_SELL = { greedy: 95, bias: 90 };
@@ -92,6 +94,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     const costDeviationPercentileData = indicators.map(d => d.costDeviationPercentile);
     const bias225PercentileData = indicators.map(d => d.bias225Percentile);
     const pvtDivergenceData = indicators.map(d => d.pvtDivergence);
+    const obvData = indicators.map(d => d.obv);
+    const obvMa20Data = indicators.map(d => d.obvMa20);
 
     // 计算抵扣价标注数据
     const lastIndex = indicators.length - 1;
@@ -761,7 +765,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     ];
 
     // 添加成交量到主图（用折线图简化显示，不干扰K线）
-    if (timeframe === 'daily') {
+    if (timeframe === 'daily' && showVolumeTrend) {
       // 计算成交量的移动平均来平滑显示
       const volMA5 = volumes.map((_, i) => {
         if (i < 4) return null;
@@ -789,7 +793,38 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           }
         }
       });
+
     }
+
+    // 添加OBV到主图（次坐标）
+    if (timeframe === 'daily' && showOBV) {
+      series.push({
+        name: 'OBV',
+        type: 'line',
+        data: obvData,
+        smooth: true,
+        lineStyle: { width: 1.5, color: '#6B7B8E', opacity: 0.85 },
+        symbol: 'none',
+        yAxisIndex: 5,
+      });
+
+      // 添加OBV的20日均线
+      series.push({
+        name: 'OBV_MA20',
+        type: 'line',
+        data: obvMa20Data,
+        smooth: true,
+        lineStyle: { width: 1, color: '#6B7B8E', type: 'dashed', opacity: 0.5 },
+        symbol: 'none',
+        yAxisIndex: 5,
+      });
+    }
+
+    // BOLL 独立于 MA 控制
+    series.push(
+      { name: 'BOLL上', type: 'line', data: bollUpperData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
+      { name: 'BOLL下', type: 'line', data: bollLowerData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
+    );
 
     if (showMA) {
       series.push(
@@ -798,8 +833,6 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
         { name: 'MA99', type: 'line', data: ma99Data, smooth: true, lineStyle: { width: 1, color: '#D2A8FF' }, symbol: 'none' },
         { name: 'MA128', type: 'line', data: ma128Data, smooth: true, lineStyle: { width: 1, color: '#03B172' }, symbol: 'none' },
         { name: 'MA225', type: 'line', data: ma225Data, smooth: true, lineStyle: { width: 1, color: '#FF3435' }, symbol: 'none' },
-        { name: 'BOLL上', type: 'line', data: bollUpperData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
-        { name: 'BOLL下', type: 'line', data: bollLowerData, smooth: true, lineStyle: { width: 1, color: '#E3B341', type: 'dashed', opacity: 0.5 }, symbol: 'none' },
       );
     }
 
@@ -883,6 +916,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
               { name: 'MAHS', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: 'EMAHS', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成交量趋势', icon: 'rect', itemStyle: { color: '#8B949E' } },
+              { name: 'OBV', icon: 'rect', itemStyle: { color: '#6B7B8E' } },
+              { name: 'OBV_MA20', icon: 'rect', itemStyle: { color: '#6B7B8E' } },
               { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
@@ -938,6 +973,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           html += `<span>最低:</span><span style="color: #03B172">${stock.low.toFixed(2)}</span>`;
           html += `<span>收盘:</span><span style="color: ${stock.close >= stock.open ? '#FF3435' : '#03B172'}">${stock.close.toFixed(2)}</span>`;
           html += `<span>成交量:</span><span>${(stock.volume / 10000).toFixed(2)}万</span>`;
+          if (ind.obv !== null && ind.obv !== undefined) html += `<span>OBV:</span><span style="color: #6B7B8E">${ind.obv.toFixed(2)}</span>`;
+          if (ind.obvMa20 !== null && ind.obvMa20 !== undefined) html += `<span>OBV_MA20:</span><span style="color: #6B7B8E">${ind.obvMa20.toFixed(2)}</span>`;
           if (ind.mahs !== null && ind.mahs !== undefined) html += `<span>MAHS:</span><span style="color: #FF3435">${ind.mahs.toFixed(2)}</span>`;
           if (ind.emahs !== null && ind.emahs !== undefined) html += `<span>EMAHS:</span><span style="color: #03B172">${ind.emahs.toFixed(2)}</span>`;
           if (ind.costDiff !== null && ind.costDiff !== undefined) html += `<span>成本差:</span><span style="color: ${ind.costDiff >= 0 ? '#FF3435' : '#03B172'}">${ind.costDiff.toFixed(2)}</span>`;
@@ -1046,12 +1083,22 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
           gridIndex: 1,
           position: 'right',
           offset: 50,
-          axisLabel: { 
+          axisLabel: {
             show: false,  // 隐藏坐标轴数值
-            color: '#E3B341', 
+            color: '#E3B341',
             fontSize: 10,
           },
           axisLine: { lineStyle: { color: '#E3B341' } },
+          splitLine: { show: false },
+        },
+        {
+          type: 'value',
+          gridIndex: 0,
+          position: 'right',
+          offset: 50,
+          scale: true,
+          axisLabel: { show: true, color: '#8B949E', fontSize: 10 },
+          axisLine: { show: true, lineStyle: { color: '#8B949E' } },
           splitLine: { show: false },
         },
       ],
@@ -1093,7 +1140,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, title,
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [stockData, indicators, showMAHS, showEMAHS, showMA, title, compact, timeframe, version]);
+  }, [stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showOBV, title, compact, timeframe, version]);
 
   return (
     <div className={`relative w-full bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${compact ? 'h-full' : 'h-[600px]'}`}>

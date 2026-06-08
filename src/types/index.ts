@@ -81,6 +81,9 @@ export interface IndicatorData {
   pvt: number | null; // PVT累积值
   pvtDivergence: 'none' | 'top' | 'bottom' | null; // 背离信号
   pvtTrend: 'rising' | 'falling' | 'flat' | null; // PVT趋势
+  // OBV能量潮
+  obv: number | null;
+  obvMa20: number | null;
 }
 
 export interface StockInfo {

@@ -28,9 +28,11 @@ const chartConfigs: { key: TimeframeType; label: string; icon: LucideIcon; color
 ];
 
 export default function StockChartsSection({ data }: StockChartsSectionProps) {
-  const [showMAHS, setShowMAHS] = useState(true);
+  const [showMAHS, setShowMAHS] = useState(false);
   const [showEMAHS, setShowEMAHS] = useState(true);
-  const [showMA, setShowMA] = useState(true);
+  const [showMA, setShowMA] = useState(false);
+  const [showVolumeTrend, setShowVolumeTrend] = useState(false);
+  const [showOBV, setShowOBV] = useState(true);
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
 
   const hasData = data.daily && data.weekly && data.min15;
@@ -483,6 +485,14 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                     <Switch id="ma-daily" checked={showMA} onCheckedChange={setShowMA} className="data-[state=checked]:bg-[#58A6FF] scale-75" />
                     <Label htmlFor="ma-daily" className="text-[10px] text-[#8B949E] cursor-pointer">MA</Label>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <Switch id="vol-daily" checked={showVolumeTrend} onCheckedChange={setShowVolumeTrend} className="data-[state=checked]:bg-[#8B949E] scale-75" />
+                    <Label htmlFor="vol-daily" className="text-[10px] text-[#8B949E] cursor-pointer">量</Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Switch id="obv-daily" checked={showOBV} onCheckedChange={setShowOBV} className="data-[state=checked]:bg-[#6B7B8E] scale-75" />
+                    <Label htmlFor="obv-daily" className="text-[10px] text-[#8B949E] cursor-pointer">OBV</Label>
+                  </div>
                 </div>
               )}
               <div className="text-xs text-[#8B949E]">
@@ -502,6 +512,8 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                     showMAHS={tf === 'daily' && showMAHS}
                     showEMAHS={tf === 'daily' && showEMAHS}
                     showMA={showMA}
+                    showVolumeTrend={showVolumeTrend}
+                    showOBV={showOBV}
                     title=""
                     compact={tf !== 'daily'}
                     timeframe={tf}
