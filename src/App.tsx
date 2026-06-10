@@ -16,7 +16,7 @@ import ValuationReportPanel from './components/ValuationReportPanel';
 import CompanyHistoryPanel from './components/CompanyHistoryPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
-import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend } from './data/watchlist';
+import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend, setSyncErrorHandler, clearSyncErrorHandler } from './data/watchlist';
 import { getAuth, setAuth, clearAuth, isLoggedIn } from './utils/auth';
 
 function App() {
@@ -45,16 +45,30 @@ function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginInput, setLoginInput] = useState({ account: '', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [syncError, setSyncError] = useState('');
 
   const refreshPool = useCallback(() => {
     setStockPool(getStockPool());
   }, []);
+
+  const showSyncError = useCallback((msg: string) => {
+    setSyncError(msg);
+    setTimeout(() => setSyncError(''), 8000);
+  }, []);
+
+  // 注册股票池同步错误处理器
+  useEffect(() => {
+    setSyncErrorHandler(showSyncError);
+    return () => clearSyncErrorHandler();
+  }, [showSyncError]);
 
   // 登录状态下，从后端同步股票池
   useEffect(() => {
     if (isLoggedIn()) {
       loadWatchlistFromBackend().then(() => {
         refreshPool();
+      }).catch(() => {
+        // 错误已通过 handler 提示到 UI
       });
     }
   }, []);
@@ -72,7 +86,9 @@ function App() {
       setAuthAccount(loginInput.account.trim());
       setShowLoginModal(false);
       setLoginInput({ account: '', password: '' });
-      await loadWatchlistFromBackend();
+      await loadWatchlistFromBackend().catch(() => {
+        // 拉取失败已通过 handler 提示，不影响登录流程
+      });
       refreshPool();
     } catch (e: any) {
       clearAuth();
@@ -137,7 +153,7 @@ function App() {
   }, [stockData.stockInfo?.symbol]);
 
   // 组合错误显示
-  const displayError = stockData.error || analysisJob.analyzeError;
+  const displayError = stockData.error || analysisJob.analyzeError || syncError;
 
   // 检查是否有数据
   const hasData = stockData.timeframeData.daily && stockData.timeframeData.weekly && stockData.timeframeData.min15;

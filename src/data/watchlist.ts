@@ -7,6 +7,14 @@
 
 import { isLoggedIn, getAuth } from '@/utils/auth';
 
+let _syncErrorHandler: ((msg: string) => void) | null = null;
+export function setSyncErrorHandler(handler: ((msg: string) => void) | null) {
+  _syncErrorHandler = handler;
+}
+export function clearSyncErrorHandler() {
+  _syncErrorHandler = null;
+}
+
 export interface StockItem {
   code: string;
   name: string;
@@ -44,12 +52,15 @@ export async function loadWatchlistFromBackend(): Promise<void> {
     if (data.categories && data.categories.length > 0) {
       localStorage.setItem(`${_key()}_categories`, JSON.stringify(data.categories));
     }
-  } catch (e) {
-    console.warn('从后端拉取股票池失败:', e);
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    console.warn('从后端拉取股票池失败:', msg);
+    _syncErrorHandler?.(`拉取股票池失败: ${msg}`);
+    throw e;
   }
 }
 
-/** 同步当前本地股票池到后端（登录状态下，静默失败） */
+/** 同步当前本地股票池到后端（登录状态下） */
 async function _syncToBackend(): Promise<void> {
   if (!isLoggedIn()) return;
   try {
@@ -57,8 +68,10 @@ async function _syncToBackend(): Promise<void> {
     const pool = getStockPool();
     const cats = getCategories();
     await saveWatchlist(pool, cats);
-  } catch (e) {
-    console.warn('同步股票池到后端失败:', e);
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    console.warn('同步股票池到后端失败:', msg);
+    _syncErrorHandler?.(`股票池同步失败: ${msg}`);
   }
 }
 
