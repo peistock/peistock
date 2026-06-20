@@ -74,14 +74,14 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     }
     chartInstance.current = echarts.init(chartRef.current, 'dark');
 
-    // 防御：保证 K 线数据和指标数组长度一致，避免附图和主图日期错位
-    const alignedLength = Math.min(stockData.length, indicators.length);
-    if (alignedLength === 0) return;
-    if (stockData.length !== indicators.length) {
-      console.warn(`[StockChart] data length mismatch: stockData=${stockData.length}, indicators=${indicators.length}, using ${alignedLength}`);
+    // 按日期对齐 K 线数据和指标数据，避免因为某个数组缺日期导致主副图错位
+    const indicatorMap = new Map(indicators.map(d => [d.date, d]));
+    const alignedStockData = stockData.filter(d => indicatorMap.has(d.date));
+    const alignedIndicators = alignedStockData.map(d => indicatorMap.get(d.date)!);
+    if (alignedStockData.length === 0) return;
+    if (alignedStockData.length !== stockData.length) {
+      console.warn(`[StockChart] date alignment: stockData=${stockData.length}, matched=${alignedStockData.length}`);
     }
-    const alignedStockData = stockData.slice(0, alignedLength);
-    const alignedIndicators = indicators.slice(0, alignedLength);
 
     const dates = alignedStockData.map(d => d.date);
     const klineData = alignedStockData.map(d => [d.open, d.close, d.low, d.high]);
