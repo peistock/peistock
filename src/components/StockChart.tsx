@@ -108,6 +108,19 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const obvData = alignedIndicators.map(d => d.obv);
     const obvMa20Data = alignedIndicators.map(d => d.obvMa20);
 
+    // 前向填充附图指标末尾的 null，避免后端指标缺失导致附图断线、与主图日期脱节
+    const forwardFill = (arr: (number | null)[]): (number | null)[] => {
+      let lastValid: number | null = null;
+      return arr.map(v => {
+        if (v !== null && v !== undefined && !isNaN(v)) lastValid = v;
+        return lastValid;
+      });
+    };
+
+    const criDataFilled = forwardFill(criData);
+    const greedyDataFilled = forwardFill(greedyData);
+    const costDeviationDataFilled = forwardFill(costDeviationData);
+
     // 计算抵扣价标注数据
     const lastIndex = alignedIndicators.length - 1;
     const ma20DeductIndex = lastIndex >= 19 ? lastIndex - 19 : -1;
@@ -859,7 +872,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     series.push({
       name: '恐慌指数',
       type: 'line',
-      data: criData,
+      data: criDataFilled,
       smooth: true,
       lineStyle: { width: 2, color: '#FF6B6B', type: 'solid' },
       symbol: 'none',
@@ -871,7 +884,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     series.push({
       name: '贪婪指数',
       type: 'line',
-      data: greedyData,
+      data: greedyDataFilled,
       smooth: true,
       lineStyle: { width: 2, color: '#03B172', type: 'solid' },
       symbol: 'none',
@@ -895,7 +908,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     series.push({
       name: '成本偏离度',
       type: 'line',
-      data: costDeviationData,
+      data: costDeviationDataFilled,
       smooth: true,
       lineStyle: { width: 1.5, color: '#E3B341', type: 'solid' },
       symbol: 'none',
