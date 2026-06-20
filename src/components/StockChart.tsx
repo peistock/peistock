@@ -1097,7 +1097,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           position: 'right',
           offset: 50,
           scale: true,
-          axisLabel: { show: true, color: '#8B949E', fontSize: 10 },
+          axisLabel: { show: false, color: '#8B949E', fontSize: 10 },
           axisLine: { show: true, lineStyle: { color: '#8B949E' } },
           splitLine: { show: false },
         },
