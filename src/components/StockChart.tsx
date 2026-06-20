@@ -68,37 +68,48 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
   useEffect(() => {
     if (!chartRef.current || stockData.length === 0) return;
 
-    if (!chartInstance.current) {
-      chartInstance.current = echarts.init(chartRef.current, 'dark');
+    // 每次数据变化都重建 ECharts 实例，避免 dataZoom/xAxis 状态残留导致主副图错位
+    if (chartInstance.current) {
+      chartInstance.current.dispose();
     }
+    chartInstance.current = echarts.init(chartRef.current, 'dark');
 
-    const dates = stockData.map(d => d.date);
-    const klineData = stockData.map(d => [d.open, d.close, d.low, d.high]);
-    const volumes = stockData.map(d => d.volume);
+    // 防御：保证 K 线数据和指标数组长度一致，避免附图和主图日期错位
+    const alignedLength = Math.min(stockData.length, indicators.length);
+    if (alignedLength === 0) return;
+    if (stockData.length !== indicators.length) {
+      console.warn(`[StockChart] data length mismatch: stockData=${stockData.length}, indicators=${indicators.length}, using ${alignedLength}`);
+    }
+    const alignedStockData = stockData.slice(0, alignedLength);
+    const alignedIndicators = indicators.slice(0, alignedLength);
 
-    const ma5Data = indicators.map(d => d.ma5);
-    const ma20Data = indicators.map(d => d.ma20);
-    const ma99Data = indicators.map(d => d.ma99);
-    const ma128Data = indicators.map(d => d.ma128);
-    const ma225Data = indicators.map(d => d.ma225);
-    const bollUpperData = indicators.map(d => d.bollUpper);
-    const bollLowerData = indicators.map(d => d.bollLower);
-    const mahsData = indicators.map(d => d.mahs);
-    const emahsData = indicators.map(d => d.emahs);
-    const criData = indicators.map(d => d.cri);
-    const greedyData = indicators.map(d => d.greedy);
-    const greedyPercentileData = indicators.map(d => d.greedyPercentile);
+    const dates = alignedStockData.map(d => d.date);
+    const klineData = alignedStockData.map(d => [d.open, d.close, d.low, d.high]);
+    const volumes = alignedStockData.map(d => d.volume);
+
+    const ma5Data = alignedIndicators.map(d => d.ma5);
+    const ma20Data = alignedIndicators.map(d => d.ma20);
+    const ma99Data = alignedIndicators.map(d => d.ma99);
+    const ma128Data = alignedIndicators.map(d => d.ma128);
+    const ma225Data = alignedIndicators.map(d => d.ma225);
+    const bollUpperData = alignedIndicators.map(d => d.bollUpper);
+    const bollLowerData = alignedIndicators.map(d => d.bollLower);
+    const mahsData = alignedIndicators.map(d => d.mahs);
+    const emahsData = alignedIndicators.map(d => d.emahs);
+    const criData = alignedIndicators.map(d => d.cri);
+    const greedyData = alignedIndicators.map(d => d.greedy);
+    const greedyPercentileData = alignedIndicators.map(d => d.greedyPercentile);
     // 情绪指数暂时隐藏，避免副图线条过多
-    // const sentimentData = indicators.map(d => d.sentiment);
-    const costDeviationData = indicators.map(d => d.costDeviation);
-    const costDeviationPercentileData = indicators.map(d => d.costDeviationPercentile);
-    const bias225PercentileData = indicators.map(d => d.bias225Percentile);
-    const pvtDivergenceData = indicators.map(d => d.pvtDivergence);
-    const obvData = indicators.map(d => d.obv);
-    const obvMa20Data = indicators.map(d => d.obvMa20);
+    // const sentimentData = alignedIndicators.map(d => d.sentiment);
+    const costDeviationData = alignedIndicators.map(d => d.costDeviation);
+    const costDeviationPercentileData = alignedIndicators.map(d => d.costDeviationPercentile);
+    const bias225PercentileData = alignedIndicators.map(d => d.bias225Percentile);
+    const pvtDivergenceData = alignedIndicators.map(d => d.pvtDivergence);
+    const obvData = alignedIndicators.map(d => d.obv);
+    const obvMa20Data = alignedIndicators.map(d => d.obvMa20);
 
     // 计算抵扣价标注数据
-    const lastIndex = indicators.length - 1;
+    const lastIndex = alignedIndicators.length - 1;
     const ma20DeductIndex = lastIndex >= 19 ? lastIndex - 19 : -1;
     const ma60DeductIndex = lastIndex >= 59 ? lastIndex - 59 : -1;
     const ma225DeductIndex = lastIndex >= 224 ? lastIndex - 224 : -1;
@@ -243,7 +254,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         const startIdx = consecutiveStart[index];
         const biasPct = bias225PercentileData[index];
         if (count >= 2 && index === startIdx && biasPct !== null && biasPct > 50) {
-          const price = stockData[index]?.low;
+          const price = alignedStockData[index]?.low;
           if (price !== undefined) {
             pvtDivergenceMarks.push({
               name: '顶背离',
@@ -273,7 +284,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         if (count >= 2 && index === endIdx &&
             hasHighCRIInStreak(startIdx, count) && 
             hasLowCostDevPercentileInStreak(startIdx, count)) {
-          const price = stockData[index]?.low;
+          const price = alignedStockData[index]?.low;
           if (price !== undefined) {
             pvtDivergenceMarks.push({
               name: '底背离',
@@ -307,7 +318,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     
     // 第一步A：找出低频BS满足的日子
     const lowFreqDays: number[] = [];
-    stockData.forEach((_, index) => {
+    alignedStockData.forEach((_, index) => {
       const costDevPct = costDeviationPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
       const cri = criData[index];
@@ -361,10 +372,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const lowFreqPivots: number[] = [];
     lowFreqStreaks.forEach(streak => {
       let pivotIdx = -1;
-      for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-        const prevMinusDI = indicators[i - 1].minusDI;
-        const currMinusDI = indicators[i].minusDI;
-        const nextMinusDI = indicators[i + 1]?.minusDI;
+      for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+        const prevMinusDI = alignedIndicators[i - 1].minusDI;
+        const currMinusDI = alignedIndicators[i].minusDI;
+        const nextMinusDI = alignedIndicators[i + 1]?.minusDI;
         if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
           if (currMinusDI > prevMinusDI && currMinusDI > nextMinusDI) {
             pivotIdx = i;
@@ -373,10 +384,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         }
       }
       if (pivotIdx === -1) {
-        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-          const prevPlusDI = indicators[i - 1].plusDI;
-          const currPlusDI = indicators[i].plusDI;
-          const nextPlusDI = indicators[i + 1]?.plusDI;
+        for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+          const prevPlusDI = alignedIndicators[i - 1].plusDI;
+          const currPlusDI = alignedIndicators[i].plusDI;
+          const nextPlusDI = alignedIndicators[i + 1]?.plusDI;
           if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
             if (currPlusDI < prevPlusDI && currPlusDI < nextPlusDI) {
               pivotIdx = i;
@@ -398,7 +409,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           return coord[0] === pivotIdx;
         });
         if (!hasBottomMark) {
-          const price = stockData[pivotIdx]?.low;
+          const price = alignedStockData[pivotIdx]?.low;
           if (price !== undefined) {
             // 检查信号间隔规则
             if (canAddBuySignal(pivotIdx, price)) {
@@ -430,7 +441,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       // 高频模式：低频信号 + 高频扩展信号
       // 第一步B：找出高频扩展满足的日子（不包括低频已满足的）
       const highFreqExtDays: number[] = [];
-      stockData.forEach((_, index) => {
+      alignedStockData.forEach((_, index) => {
         // 跳过已经是低频信号的日子
         if (lowFreqDays.includes(index)) return;
         
@@ -456,10 +467,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       const highFreqPivots: number[] = [];
       highFreqStreaks.forEach(streak => {
         let pivotIdx = -1;
-        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-          const prevMinusDI = indicators[i - 1].minusDI;
-          const currMinusDI = indicators[i].minusDI;
-          const nextMinusDI = indicators[i + 1]?.minusDI;
+        for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+          const prevMinusDI = alignedIndicators[i - 1].minusDI;
+          const currMinusDI = alignedIndicators[i].minusDI;
+          const nextMinusDI = alignedIndicators[i + 1]?.minusDI;
           if (prevMinusDI !== null && currMinusDI !== null && nextMinusDI !== null) {
             if (currMinusDI > prevMinusDI && currMinusDI > nextMinusDI) {
               pivotIdx = i;
@@ -468,10 +479,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           }
         }
         if (pivotIdx === -1) {
-          for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-            const prevPlusDI = indicators[i - 1].plusDI;
-            const currPlusDI = indicators[i].plusDI;
-            const nextPlusDI = indicators[i + 1]?.plusDI;
+          for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+            const prevPlusDI = alignedIndicators[i - 1].plusDI;
+            const currPlusDI = alignedIndicators[i].plusDI;
+            const nextPlusDI = alignedIndicators[i + 1]?.plusDI;
             if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
               if (currPlusDI < prevPlusDI && currPlusDI < nextPlusDI) {
                 pivotIdx = i;
@@ -493,7 +504,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           return coord[0] === pivotIdx;
         });
         if (!hasBottomMark) {
-          const price = stockData[pivotIdx]?.low;
+          const price = alignedStockData[pivotIdx]?.low;
           if (price !== undefined) {
             // 检查信号间隔规则
             if (canAddBuySignal(pivotIdx, price)) {
@@ -528,7 +539,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     
     // 第一步A：找出低频卖出满足的日子
     const lowFreqSellDays: number[] = [];
-    stockData.forEach((_, index) => {
+    alignedStockData.forEach((_, index) => {
       const greedyPct = greedyPercentileData[index];
       const bias225Pct = bias225PercentileData[index];
       const isGreedyLowFreq = greedyPct !== null && greedyPct > LOW_FREQ_SELL.greedy; // >95%
@@ -543,10 +554,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const lowFreqSellPivots: number[] = [];
     lowFreqSellStreaks.forEach(streak => {
       let pivotIdx = -1;
-      for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-        const prevPlusDI = indicators[i - 1].plusDI;
-        const currPlusDI = indicators[i].plusDI;
-        const nextPlusDI = indicators[i + 1]?.plusDI;
+      for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+        const prevPlusDI = alignedIndicators[i - 1].plusDI;
+        const currPlusDI = alignedIndicators[i].plusDI;
+        const nextPlusDI = alignedIndicators[i + 1]?.plusDI;
         if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
           if (currPlusDI > prevPlusDI && currPlusDI > nextPlusDI) {
             pivotIdx = i;
@@ -566,7 +577,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           return coord[0] === pivotIdx;
         });
         if (!hasTopMark) {
-          const price = stockData[pivotIdx]?.high;
+          const price = alignedStockData[pivotIdx]?.high;
           if (price !== undefined) {
             // 检查信号间隔规则
             if (canAddSellSignal(pivotIdx, price)) {
@@ -597,7 +608,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     } else {
       // 高频模式：低频卖出 + 高频扩展卖出
       const highFreqSellExtDays: number[] = [];
-      stockData.forEach((_, index) => {
+      alignedStockData.forEach((_, index) => {
         if (lowFreqSellDays.includes(index)) return;
         const greedyPct = greedyPercentileData[index];
         const bias225Pct = bias225PercentileData[index];
@@ -612,10 +623,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       const highFreqSellPivots: number[] = [];
       highFreqSellStreaks.forEach(streak => {
         let pivotIdx = -1;
-        for (let i = streak.start + 1; i <= streak.end && i < stockData.length - 1; i++) {
-          const prevPlusDI = indicators[i - 1].plusDI;
-          const currPlusDI = indicators[i].plusDI;
-          const nextPlusDI = indicators[i + 1]?.plusDI;
+        for (let i = streak.start + 1; i <= streak.end && i < alignedStockData.length - 1; i++) {
+          const prevPlusDI = alignedIndicators[i - 1].plusDI;
+          const currPlusDI = alignedIndicators[i].plusDI;
+          const nextPlusDI = alignedIndicators[i + 1]?.plusDI;
           if (prevPlusDI !== null && currPlusDI !== null && nextPlusDI !== null) {
             if (currPlusDI > prevPlusDI && currPlusDI > nextPlusDI) {
               pivotIdx = i;
@@ -636,7 +647,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           return coord[0] === pivotIdx;
         });
         if (!hasTopMark) {
-          const price = stockData[pivotIdx]?.high;
+          const price = alignedStockData[pivotIdx]?.high;
           if (price !== undefined) {
             // 检查信号间隔规则
             if (canAddSellSignal(pivotIdx, price)) {
@@ -670,7 +681,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const deductMarkPoints: echarts.MarkPointComponentOption['data'] = [];
     
     if (ma20DeductIndex >= 0) {
-      const price = stockData[ma20DeductIndex]?.close;
+      const price = alignedStockData[ma20DeductIndex]?.close;
       if (price !== undefined) {
         deductMarkPoints.push({
           name: `MA20\n${price.toFixed(1)}`,
@@ -695,7 +706,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     }
     
     if (ma60DeductIndex >= 0) {
-      const price = stockData[ma60DeductIndex]?.close;
+      const price = alignedStockData[ma60DeductIndex]?.close;
       if (price !== undefined) {
         deductMarkPoints.push({
           name: `MA60\n${price.toFixed(1)}`,
@@ -720,7 +731,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     }
     
     if (ma225DeductIndex >= 0) {
-      const price = stockData[ma225DeductIndex]?.close;
+      const price = alignedStockData[ma225DeductIndex]?.close;
       if (price !== undefined) {
         deductMarkPoints.push({
           name: `MA225\n${price.toFixed(1)}`,
@@ -845,48 +856,48 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     
     // 添加CRI（恐慌）、贪婪得分和综合情绪指数到副图 - 所有时间周期都显示
     // 恐慌指标（CRI）- 红色
-    series.push({ 
-      name: '恐慌指数', 
-      type: 'line', 
-      data: criData, 
-      smooth: true, 
-      lineStyle: { width: 2, color: '#FF6B6B', type: 'solid' }, 
+    series.push({
+      name: '恐慌指数',
+      type: 'line',
+      data: criData,
+      smooth: true,
+      lineStyle: { width: 2, color: '#FF6B6B', type: 'solid' },
       symbol: 'none',
       xAxisIndex: 1,
       yAxisIndex: 2,
     });
-    
+
     // 贪婪指标 - 绿色 (与EMAHS同色)
-    series.push({ 
-      name: '贪婪指数', 
-      type: 'line', 
-      data: greedyData, 
-      smooth: true, 
-      lineStyle: { width: 2, color: '#03B172', type: 'solid' }, 
+    series.push({
+      name: '贪婪指数',
+      type: 'line',
+      data: greedyData,
+      smooth: true,
+      lineStyle: { width: 2, color: '#03B172', type: 'solid' },
       symbol: 'none',
       xAxisIndex: 1,
       yAxisIndex: 2,
     });
-    
+
     // 情绪指数 - 暂时隐藏，避免副图线条过多
-    // series.push({ 
-    //   name: '情绪指数', 
-    //   type: 'line', 
-    //   data: sentimentData, 
-    //   smooth: true, 
-    //   lineStyle: { width: 1.5, color: '#D2A8FF', type: 'dashed' }, 
+    // series.push({
+    //   name: '情绪指数',
+    //   type: 'line',
+    //   data: sentimentData,
+    //   smooth: true,
+    //   lineStyle: { width: 1.5, color: '#D2A8FF', type: 'dashed' },
     //   symbol: 'none',
     //   xAxisIndex: 1,
     //   yAxisIndex: 3,
     // });
-    
+
     // 成本偏离度 - 黄色 (与MA20同色)
-    series.push({ 
-      name: '成本偏离度', 
-      type: 'line', 
-      data: costDeviationData, 
-      smooth: true, 
-      lineStyle: { width: 1.5, color: '#E3B341', type: 'solid' }, 
+    series.push({
+      name: '成本偏离度',
+      type: 'line',
+      data: costDeviationData,
+      smooth: true,
+      lineStyle: { width: 1.5, color: '#E3B341', type: 'solid' },
       symbol: 'none',
       xAxisIndex: 1,
       yAxisIndex: 4,
@@ -962,8 +973,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         formatter: (params: any) => {
           if (!params || params.length === 0) return '';
           const dataIndex = params[0].dataIndex;
-          const stock = stockData[dataIndex];
-          const ind = indicators[dataIndex];
+          const stock = alignedStockData[dataIndex];
+          const ind = alignedIndicators[dataIndex];
           
           let html = `<div style="font-family: JetBrains Mono; font-size: 12px;">`;
           html += `<div style="color: #8B949E; margin-bottom: 4px;">${stock.date}</div>`;
@@ -995,34 +1006,34 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           return html;
         },
       },
+      axisPointer: {
+        link: [{ xAxisIndex: [0] }],
+        label: { backgroundColor: '#777' },
+      },
       grid: compact ? [
         { left: '36', right: '36', top: '26', height: '56%' },  // 主图 - 紧凑
         { left: '36', right: '36', top: '66%', height: '24%' },  // 副图 - 紧凑
       ] : [
-        { left: '50', right: '50', top: '55', bottom: '110', height: '58%' },  // 主图
-        { left: '50', right: '50', top: '76%', bottom: '40', height: '16%' },  // 副图下移，避免与主图重叠
+        { left: '50', right: '50', top: '55', height: '58%' },  // 主图：统一用 top+height，避免 bottom 与副图冲突导致错位
+        { left: '50', right: '50', top: '76%', height: '16%' },  // 副图：统一用 top+height
       ],
       xAxis: [
         {
           type: 'category',
           data: dates,
-          boundaryGap: false,
+          boundaryGap: true,
           axisLine: { lineStyle: { color: '#30363D' } },
           axisLabel: { color: '#8B949E' },
           splitLine: { show: false },
-          min: 'dataMin',
-          max: 'dataMax',
         },
         {
           type: 'category',
           gridIndex: 1,
           data: dates,
-          boundaryGap: false,
+          boundaryGap: true,
           axisLine: { lineStyle: { color: '#30363D' } },
           axisLabel: { show: false },
           splitLine: { show: false },
-          min: 'dataMin',
-          max: 'dataMax',
         },
       ],
       yAxis: [
@@ -1103,12 +1114,14 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         },
       ],
       dataZoom: [
-        { type: 'inside', xAxisIndex: [0, 1], start: 70, end: 100 },
+        { type: 'inside', xAxisIndex: [0], start: 70, end: 100, filterMode: 'filter' },
+        { type: 'inside', xAxisIndex: [1], start: 70, end: 100, filterMode: 'filter' },
         {
           type: 'slider',
-          xAxisIndex: [0, 1],
+          xAxisIndex: [0],
           start: 70,
           end: 100,
+          filterMode: 'filter',
           bottom: compact ? 4 : 10,
           height: compact ? 12 : 20,
           borderColor: '#30363D',
@@ -1139,6 +1152,8 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      chartInstance.current?.dispose();
+      chartInstance.current = null;
     };
   }, [stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showOBV, title, compact, timeframe, version]);
 
