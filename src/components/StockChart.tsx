@@ -1114,14 +1114,14 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         },
       ],
       dataZoom: [
-        { type: 'inside', xAxisIndex: [0], start: 70, end: 100, filterMode: 'filter' },
-        { type: 'inside', xAxisIndex: [1], start: 70, end: 100, filterMode: 'filter' },
+        { type: 'inside', xAxisIndex: [0], start: 70, end: 100, filterMode: 'none' },
+        { type: 'inside', xAxisIndex: [1], start: 70, end: 100, filterMode: 'none' },
         {
           type: 'slider',
           xAxisIndex: [0],
           start: 70,
           end: 100,
-          filterMode: 'filter',
+          filterMode: 'none',
           bottom: compact ? 4 : 10,
           height: compact ? 12 : 20,
           borderColor: '#30363D',
@@ -1143,6 +1143,60 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
 
     chartInstance.current.setOption(option, true);
     setLoading(false);
+
+    // ECharts 6 多 grid / 多 xAxis 下 dataZoom 同步有 bug，手动同步附图缩放
+    let isSyncing = false;
+    let lastSyncTime = 0;
+    const syncSubChartZoom = (params?: any) => {
+      if (isSyncing) return;
+      const now = Date.now();
+      if (now - lastSyncTime < 80) return;
+      lastSyncTime = now;
+
+      let start: number | undefined;
+      let end: number | undefined;
+      if (params?.batch && params.batch.length > 0) {
+        const mainBatch = params.batch.find((b: any) =>
+          b.dataZoomIndex === 0 || b.xAxisIndex === 0 ||
+          (Array.isArray(b.xAxisIndex) && b.xAxisIndex[0] === 0)
+        );
+        if (mainBatch) {
+          start = mainBatch.start;
+          end = mainBatch.end;
+        }
+      }
+      if (start == null || end == null) {
+        const currentOpt = chartInstance.current?.getOption();
+        if (!currentOpt?.dataZoom) return;
+        const mainDz = (currentOpt.dataZoom as any[]).find((dz: any) => {
+          const idx = dz.xAxisIndex;
+          return (idx === 0 || (Array.isArray(idx) && idx[0] === 0)) && dz.type !== 'slider';
+        });
+        if (!mainDz || mainDz.start == null) return;
+        start = mainDz.start;
+        end = mainDz.end;
+      }
+      if (start == null || end == null) return;
+
+      const currentOpt = chartInstance.current?.getOption();
+      const subDz = (currentOpt?.dataZoom as any[])?.find((dz: any) => {
+        const idx = dz.xAxisIndex;
+        return (idx === 1 || (Array.isArray(idx) && idx[0] === 1)) && dz.type !== 'slider';
+      });
+      if (subDz && Math.abs(subDz.start - start) < 0.1 && Math.abs(subDz.end - end) < 0.1) return;
+
+      isSyncing = true;
+      chartInstance.current?.dispatchAction({
+        type: 'dataZoom',
+        start,
+        end,
+        xAxisIndex: [1],
+        animation: { duration: 0 }
+      });
+      isSyncing = false;
+    };
+    chartInstance.current.on('dataZoom', syncSubChartZoom);
+    syncSubChartZoom();
 
     const handleResize = () => {
       chartInstance.current?.resize();
