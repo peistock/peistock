@@ -86,6 +86,31 @@ export interface IndicatorData {
   obvMa20: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// ETF 资金流向
+// ---------------------------------------------------------------------------
+
+export interface ETFMarketFlowData {
+  dates: string[];
+  inflow: number[];
+  cumulative: number[];
+}
+
+export interface ETFSectorFlowData {
+  sectors: string[];
+  inflow: number[];
+}
+
+export interface ETFListItem {
+  code: string;
+  name: string;
+  category: string;
+  price: number;
+  shares: number;
+  nav: number;
+  trade_date: string;
+}
+
 export interface StockInfo {
   symbol: string;
   name: string;

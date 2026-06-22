@@ -227,3 +227,42 @@ export interface DividendYieldResponse {
 export async function getDividendYield(code: string): Promise<DividendYieldResponse> {
   return fetchJSON(`/dividend/${code}`);
 }
+
+// ---------------------------------------------------------------------------
+// ETF 资金流向
+// ---------------------------------------------------------------------------
+
+import type { ETFMarketFlowData, ETFSectorFlowData, ETFListItem } from '@/types';
+
+export interface ETFMarketFlowResponse {
+  status: string;
+  data: ETFMarketFlowData;
+  message?: string;
+}
+
+export interface ETFSectorFlowResponse {
+  status: string;
+  data: ETFSectorFlowData;
+  message?: string;
+}
+
+export interface ETFListResponse {
+  status: string;
+  data: ETFListItem[];
+  message?: string;
+}
+
+/** 全市场 ETF 净流入趋势 */
+export async function getETFMarketFlow(days: number = 30): Promise<ETFMarketFlowResponse> {
+  return fetchJSON(`/etf/fund-flow/market?days=${days}`);
+}
+
+/** ETF 板块资金轮动 */
+export async function getETFSectorFlow(days: number = 7): Promise<ETFSectorFlowResponse> {
+  return fetchJSON(`/etf/fund-flow/sector?days=${days}`);
+}
+
+/** 热门 ETF 列表 */
+export async function getETFList(): Promise<ETFListResponse> {
+  return fetchJSON('/etf/list');
+}

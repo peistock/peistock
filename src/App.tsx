@@ -14,6 +14,7 @@ import BacktestPanel from './components/BacktestPanel';
 import SignalBacktestPanel from './components/SignalBacktestPanel';
 import ValuationReportPanel from './components/ValuationReportPanel';
 import CompanyHistoryPanel from './components/CompanyHistoryPanel';
+import ETFFundFlowPanel from './components/ETFFundFlowPanel';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
 import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend } from './data/watchlist';
@@ -433,6 +434,13 @@ function App() {
         )}
 
         <StockChartsSection data={stockData.timeframeData} stockInfo={stockData.stockInfo} />
+
+        {/* ETF 资金流向面板 */}
+        {stockData.stockInfo && (
+          <section className="mb-6">
+            <ETFFundFlowPanel />
+          </section>
+        )}
 
         {/* Empty State */}
         {!hasData && !stockData.loading && (
