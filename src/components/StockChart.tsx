@@ -9,14 +9,14 @@ interface StockChartProps {
   showEMAHS: boolean;
   showMA: boolean;
   showVolumeTrend?: boolean;
-  showOBV?: boolean;
+  showPVT?: boolean;
   title?: string;
   compact?: boolean;
   timeframe?: 'daily' | 'weekly' | 'min15';
   version?: 'strict' | 'loose'; // 严格版/宽松版
 }
 
-const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showOBV, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
+const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showPVT, title, compact, timeframe, version = 'strict' }: StockChartProps) => {
   // 低频BS阈值（固定）
   const LOW_FREQ_BUY = { costDev: 5, bias: 5, cri: 90 };
   const LOW_FREQ_SELL = { greedy: 95, bias: 90 };
@@ -94,8 +94,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const costDeviationPercentileData = indicators.map(d => d.costDeviationPercentile);
     const bias225PercentileData = indicators.map(d => d.bias225Percentile);
     const pvtDivergenceData = indicators.map(d => d.pvtDivergence);
-    const obvData = indicators.map(d => d.obv);
-    const obvMa20Data = indicators.map(d => d.obvMa20);
+    const pvtData = indicators.map(d => d.pvt);
 
     // 计算抵扣价标注数据
     const lastIndex = indicators.length - 1;
@@ -243,24 +242,26 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         const startIdx = consecutiveStart[index];
         const biasPct = bias225PercentileData[index];
         if (count >= 2 && index === startIdx && biasPct !== null && biasPct > 50) {
-          const price = stockData[index]?.low;
+          const price = stockData[index]?.high;
           if (price !== undefined) {
             pvtDivergenceMarks.push({
               name: '顶背离',
               coord: [index, price],
               value: 'S',
               symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
+              symbolSize: [1, 4],
+              itemStyle: { color: '#03B172' },
               label: {
                 show: true,
-                formatter: 'S',
-                fontSize: 11,
-                fontWeight: 'bold',
+                position: 'top',
+                distance: 3,
+                fontSize: 7,
                 color: '#03B172',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
+                backgroundColor: 'rgba(13,17,23,0.85)',
+                padding: [0, 2],
+                borderRadius: 1,
+                borderWidth: 0,
+                formatter: '顶背离',
               },
             });
           }
@@ -271,7 +272,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         const startIdx = consecutiveStart[index];
         const endIdx = startIdx + count - 1;
         if (count >= 2 && index === endIdx &&
-            hasHighCRIInStreak(startIdx, count) && 
+            hasHighCRIInStreak(startIdx, count) &&
             hasLowCostDevPercentileInStreak(startIdx, count)) {
           const price = stockData[index]?.low;
           if (price !== undefined) {
@@ -280,17 +281,19 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
               coord: [index, price],
               value: 'B',
               symbol: 'rect',
-              symbolSize: [14, 14],
-              itemStyle: { color: 'transparent' },
+              symbolSize: [1, 4],
+              itemStyle: { color: '#FF3435' },
               label: {
                 show: true,
-                formatter: 'B',
-                fontSize: 11,
-                fontWeight: 'bold',
+                position: 'bottom',
+                distance: 3,
+                fontSize: 7,
                 color: '#FF3435',
-                backgroundColor: 'rgba(22,27,34,0.85)',
-                padding: [1, 3],
-                borderRadius: 2,
+                backgroundColor: 'rgba(13,17,23,0.85)',
+                padding: [0, 2],
+                borderRadius: 1,
+                borderWidth: 0,
+                formatter: '底背离',
               },
             });
           }
@@ -796,25 +799,14 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
 
     }
 
-    // 添加OBV到主图（次坐标）
-    if (timeframe === 'daily' && showOBV) {
+    // 添加PVT到主图（次坐标）
+    if (timeframe === 'daily' && showPVT) {
       series.push({
-        name: 'OBV',
+        name: 'PVT',
         type: 'line',
-        data: obvData,
+        data: pvtData,
         smooth: true,
-        lineStyle: { width: 1.5, color: '#6B7B8E', opacity: 0.85 },
-        symbol: 'none',
-        yAxisIndex: 5,
-      });
-
-      // 添加OBV的20日均线
-      series.push({
-        name: 'OBV_MA20',
-        type: 'line',
-        data: obvMa20Data,
-        smooth: true,
-        lineStyle: { width: 1, color: '#6B7B8E', type: 'dashed', opacity: 0.5 },
+        lineStyle: { width: 1.5, color: '#D2A8FF', opacity: 0.25 },
         symbol: 'none',
         yAxisIndex: 5,
       });
@@ -1140,7 +1132,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showOBV, title, compact, timeframe, version]);
+  }, [stockData, indicators, showMAHS, showEMAHS, showMA, showVolumeTrend, showPVT, title, compact, timeframe, version]);
 
   return (
     <div className={`relative w-full bg-[#161B22] rounded-xl border border-[#30363D] overflow-hidden ${compact ? 'h-full' : 'h-[600px]'}`}>
