@@ -87,6 +87,13 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
         const isADXStrongTrend = adx !== null && adx >= 40 && adxState === 'rising';
         const isADXWeakening = adx !== null && adx >= 40 && adxState === 'falling';
 
+        // ADX 方向判断（与趋势强度综合保持一致）
+        const plusDI = lastIndicator.plusDI ?? 0;
+        const minusDI = lastIndicator.minusDI ?? 0;
+        const diDiff = plusDI - minusDI;
+        const isADXBearish = diDiff < -5;
+        const adxDirectionLabel = isADXBearish ? '空头' : '多头';
+
         const getTrendLevel = () => {
           if (adx === null) return 'weak';
           if (hasPVTTopDivergence && adxState === 'falling') return 'weak';
@@ -360,29 +367,29 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
           stateDesc = 'PVT顶背离+ADX弱，趋势不明，谨慎观望';
         } else if (isStrongTrend && adxRising) {
           marketState = 'normal';
-          stateTitle = 'ADX强趋势·上升';
+          stateTitle = isADXBearish ? 'ADX强趋势·空头上升' : 'ADX强趋势·上升';
           stateColor = '#03B172';
-          stateDesc = 'ADX强且上升，趋势强劲，可持股待涨';
+          stateDesc = isADXBearish ? 'ADX强且上升，但方向偏空，谨慎追跌' : 'ADX强且上升，趋势强劲，可持股待涨';
         } else if (isStrongTrend) {
           marketState = 'normal';
-          stateTitle = 'ADX强趋势';
+          stateTitle = isADXBearish ? 'ADX强趋势·空头' : 'ADX强趋势';
           stateColor = '#03B172';
-          stateDesc = 'ADX强趋势，可持股待涨，关注回调买入';
+          stateDesc = isADXBearish ? 'ADX强趋势但方向偏空，观望为主' : 'ADX强趋势，可持股待涨，关注回调买入';
         } else if (isMediumTrend && adxRising) {
           marketState = 'normal';
-          stateTitle = 'ADX多头·上升';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}·上升` : 'ADX多头·上升';
           stateColor = '#58A6FF';
-          stateDesc = 'ADX中等且上升，趋势转强，可积极操作';
+          stateDesc = isADXBearish ? 'ADX中等且上升，但方向偏空，谨慎操作' : 'ADX中等且上升，趋势转强，可积极操作';
         } else if (isMediumTrend && adxFalling) {
           marketState = 'normal';
-          stateTitle = 'ADX多头·回落';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}·回落` : 'ADX多头·回落';
           stateColor = '#E3B341';
-          stateDesc = 'ADX中等但回落，趋势减弱，谨慎追高';
+          stateDesc = isADXBearish ? 'ADX中等但回落，方向偏空，观望为主' : 'ADX中等但回落，趋势减弱，谨慎追高';
         } else if (isMediumTrend) {
           marketState = 'normal';
-          stateTitle = 'ADX多头';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}` : 'ADX多头';
           stateColor = '#58A6FF';
-          stateDesc = 'ADX中等趋势，可积极操作';
+          stateDesc = isADXBearish ? 'ADX中等趋势，方向偏空，谨慎操作' : 'ADX中等趋势，可积极操作';
         } else if (hasPVTBottomDivergence && adxRising) {
           marketState = 'normal';
           stateTitle = '底背离·ADX上升';
