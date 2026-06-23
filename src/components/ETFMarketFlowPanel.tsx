@@ -16,7 +16,7 @@ function getYearToDateDays(): number {
 }
 
 const TIME_OPTIONS: TimeOption[] = [
-  { label: '1日', days: 1 },
+  { label: '1日', days: 2 },
   { label: '1周', days: 7 },
   { label: '1月', days: 30 },
   { label: '3月', days: 90 },
@@ -186,22 +186,20 @@ export default function ETFMarketFlowPanel() {
         </div>
       </div>
 
-      <div className="px-4 py-3">
+      <div className="px-4 py-3 relative min-h-[288px]">
         {loading && (
-          <div className="flex items-center justify-center py-10 gap-2 text-[#8B949E] text-sm">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#161B22]/80 py-10 gap-2 text-[#8B949E] text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
             加载 ETF 市场资金流向...
           </div>
         )}
         {!loading && error && (
-          <div className="text-center py-8 text-[#FF3435] text-sm">{error}</div>
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#161B22]/80 text-[#FF3435] text-sm">{error}</div>
         )}
         {!loading && !error && data && data.dates.length === 0 && (
-          <div className="text-center py-8 text-[#8B949E] text-sm">暂无 ETF 资金流向数据</div>
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#161B22]/80 text-[#8B949E] text-sm">暂无 ETF 资金流向数据</div>
         )}
-        {!loading && !error && data && data.dates.length > 0 && (
-          <div ref={chartRef} className="w-full h-72" />
-        )}
+        <div ref={chartRef} className="w-full h-72" />
       </div>
     </div>
   );
