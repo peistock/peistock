@@ -5,6 +5,7 @@ import { getMarketBreadth } from '@/utils/researchApi';
 import type { MarketBreadthData } from '@/types';
 
 const MA_DAYS = 200;
+const MA_WEEKS = 40;
 const INDEX_CODE = '000300';
 
 export default function MarketBreadthPanel() {
@@ -66,7 +67,7 @@ export default function MarketBreadthPanel() {
           const date = params[0].axisValue;
           let html = `<div class="font-mono">${date}</div>`;
           params.forEach((p: any) => {
-            const val = p.seriesName === '站上200日线占比' ? `${p.value}%` : p.value;
+            const val = p.seriesName === `站上${MA_WEEKS}周线占比` ? `${p.value}%` : p.value;
             html += `<div class="flex items-center gap-2 mt-1">
               <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color}"></span>
               <span class="text-[#8B949E]">${p.seriesName}:</span>
@@ -77,7 +78,7 @@ export default function MarketBreadthPanel() {
         },
       },
       legend: {
-        data: ['站上200日线占比', '沪深300收盘价'],
+        data: [`站上${MA_WEEKS}周线占比（${MA_DAYS}日等效）`, '沪深300收盘价'],
         textStyle: { color: '#8B949E', fontSize: 11 },
         top: 8,
       },
@@ -112,7 +113,7 @@ export default function MarketBreadthPanel() {
       ],
       series: [
         {
-          name: '站上200日线占比',
+          name: `站上${MA_WEEKS}周线占比（${MA_DAYS}日等效）`,
           type: 'line',
           data: above_ratio,
           smooth: true,
@@ -159,11 +160,11 @@ export default function MarketBreadthPanel() {
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-[#30363D]">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-[#FF9500]" />
-          <span className="text-sm text-[#C9D1D9]">沪深300 市场宽度</span>
+          <span className="text-sm text-[#C9D1D9]">沪深300 市场宽度（周线）</span>
           {latest && (
             <span className="text-xs text-[#8B949E]">
               <span className="font-mono text-[#FF9500]">{latest.ratio.toFixed(1)}%</span>
-              <span className="mx-1">站上{MA_DAYS}日线</span>
+              <span className="mx-1">站上{MA_WEEKS}周线（{MA_DAYS}日等效）</span>
               <span className="font-mono text-[#58A6FF]">{latest.close.toFixed(2)}</span>
             </span>
           )}
