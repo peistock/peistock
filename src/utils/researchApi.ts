@@ -232,7 +232,7 @@ export async function getDividendYield(code: string): Promise<DividendYieldRespo
 // ETF 资金流向
 // ---------------------------------------------------------------------------
 
-import type { ETFMarketFlowData, ETFSectorFlowData, ETFListItem } from '@/types';
+import type { ETFMarketFlowData, ETFSectorFlowData, ETFListItem, ETFFundFlowDetailItem } from '@/types';
 
 export interface ETFMarketFlowResponse {
   status: string;
@@ -265,4 +265,16 @@ export async function getETFSectorFlow(days: number = 7): Promise<ETFSectorFlowR
 /** 热门 ETF 列表 */
 export async function getETFList(): Promise<ETFListResponse> {
   return fetchJSON('/etf/list');
+}
+
+/** ETF 单只多窗口资金流向明细 */
+export interface ETFFundFlowDetailResponse {
+  status: string;
+  data: ETFFundFlowDetailItem[];
+  message?: string;
+}
+
+export async function getETFFundFlowDetail(sector: string = ''): Promise<ETFFundFlowDetailResponse> {
+  const q = sector ? `?sector=${encodeURIComponent(sector)}` : '';
+  return fetchJSON(`/etf/fund-flow/detail${q}`);
 }

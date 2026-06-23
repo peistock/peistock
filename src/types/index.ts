@@ -111,6 +111,27 @@ export interface ETFListItem {
   trade_date: string;
 }
 
+export interface ETFWindowFlow {
+  flow: number;
+  change_rate: number;
+}
+
+export interface ETFFundFlowDetailItem {
+  code: string;
+  name: string;
+  category: string;
+  scale: number;
+  windows: {
+    '1': ETFWindowFlow;
+    '7': ETFWindowFlow;
+    '14': ETFWindowFlow;
+    '30': ETFWindowFlow;
+    '90': ETFWindowFlow;
+    '180': ETFWindowFlow;
+    '365': ETFWindowFlow;
+  };
+}
+
 export interface StockInfo {
   symbol: string;
   name: string;
