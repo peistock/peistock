@@ -37,7 +37,8 @@ function formatFlow(v: number): string {
   return `${sign}${v.toFixed(1)}`;
 }
 
-function formatRate(v: number): string {
+function formatRate(v: number | null): string {
+  if (v === null) return '—';
   const sign = v >= 0 ? '+' : '';
   return `${sign}${v.toFixed(1)}%`;
 }
@@ -158,7 +159,12 @@ export default function ETFFundFlowDetailTable() {
                   {WINDOWS.map((w) => {
                     const v = item.windows[w.key];
                     const flowColor = v.flow >= 0 ? 'text-[#03B172]' : 'text-[#FF3435]';
-                    const rateColor = v.change_rate >= 0 ? 'text-[#03B172]' : 'text-[#FF3435]';
+                    const rateColor =
+                      v.change_rate === null
+                        ? 'text-[#8B949E]'
+                        : v.change_rate >= 0
+                        ? 'text-[#03B172]'
+                        : 'text-[#FF3435]';
                     return (
                       <td
                         key={w.key}

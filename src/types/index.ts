@@ -113,7 +113,7 @@ export interface ETFListItem {
 
 export interface ETFWindowFlow {
   flow: number;
-  change_rate: number;
+  change_rate: number | null;
 }
 
 export interface ETFFundFlowDetailItem {
