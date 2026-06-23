@@ -101,6 +101,12 @@ export interface ETFSectorFlowData {
   inflow: number[];
 }
 
+export interface MarketBreadthData {
+  dates: string[];
+  above_ratio: number[];
+  index_close: number[];
+}
+
 export interface ETFListItem {
   code: string;
   name: string;
