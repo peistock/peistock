@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-Vite 开发服务器默认运行在 `http://localhost:5173`，API 请求通过 Vite 代理转发到 `http://localhost:8000`。
+Vite 开发服务器默认运行在 `http://localhost:5173`，API 请求通过 Vite 代理转发到 `http://localhost:8002`。
 
 ## 构建
 
@@ -31,7 +31,7 @@ npm run build
 
 | 文件 | 用途 |
 |------|------|
-| `.env.development` | 本地开发：`VITE_RESEARCH_API_BASE=/api/research`（经 Vite 代理到 localhost:8000） |
+| `.env.development` | 本地开发：`VITE_RESEARCH_API_BASE=/api/research`（经 Vite 代理到 localhost:8002） |
 | `.env.production` | 生产环境：`VITE_RESEARCH_API_BASE=https://research.peistock.win` |
 
 ## 功能模块

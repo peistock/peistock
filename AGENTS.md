@@ -194,7 +194,7 @@ node test-scripts/test_percentile.mjs
 - **自动部署**: GitHub push 后自动触发 EdgeOne 构建
 - **构建配置**: `edgeone.json`
 - **AI 分析后端**: RebelResearchOS (`research.peistock.win`)，部署在 JD Cloud 服务器，通过 Cloudflare Tunnel 代理
-  - 本地开发时 Vite 代理 `/api/research` → `http://localhost:8000`
+  - 本地开发时 Vite 代理 `/api/research` → `http://localhost:8002`
   - 生产环境直接请求 `research.peistock.win`
 
 ## 已知问题
