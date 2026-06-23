@@ -1,9 +1,11 @@
-import ETFFundFlowPanel from './ETFFundFlowPanel';
+import ETFMarketFlowPanel from './ETFMarketFlowPanel';
+import ETFSectorFlowPanel from './ETFSectorFlowPanel';
 
 export default function SectorView() {
   return (
     <div className="space-y-6">
-      <ETFFundFlowPanel />
+      <ETFMarketFlowPanel />
+      <ETFSectorFlowPanel />
     </div>
   );
 }
