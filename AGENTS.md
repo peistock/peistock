@@ -38,8 +38,23 @@
 | OBV | 开 | 灰靛实线 + 虚线 MA20 |
 | BOLL | 始终显示 | 黄色虚线，不受任何开关控制 |
 
+#### 1.1 市场宽度（2026-06-23 新增）
+- **位置**：`src/components/MarketBreadthPanel.tsx`，挂载在 `SectorView.tsx` 顶部
+- **数据**：`GET /api/market/breadth/above-ma?index=000300&days=200`
+- **口径**：沪深300成分股收盘价站上 40 周均线（200 日等效）的占比，双 Y 轴叠加沪深300收盘价
+- **状态**：默认展开，加载中显示 spinner
+
+#### 1.2 ETF 资金流向（2026-06-23 新增）
+- **走势/板块**：`src/components/ETFMarketFlowPanel.tsx`（走势）+ `ETFSectorFlowPanel.tsx`（板块轮动）
+  - `GET /api/etf/fund-flow/market?days=` 每日净流入柱状图 + 累计净流入折线
+  - `GET /api/etf/fund-flow/sector?days=` 左右对称板块轮动条形图
+- **明细表**：`src/components/ETFFundFlowDetailTable.tsx`
+  - 默认折叠，点击展开才请求 `GET /api/etf/fund-flow/detail?sector=`
+  - 支持按 1/7/14/30/90/180/365 日窗口排序，显示净流入（亿元）和份额变化率
+- **分类映射**：由后端 `config/etf_categories.json` 维护
+
 #### 2. 股票池 (src/data/watchlist.ts + src/components/StockPool.tsx)
-- **持久化股票池**: localStorage 存储（key: `rros_stock_pool`），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化并写入 localStorage，后续支持增删改/star/分类切换
+- **持久化股票池**: localStorage 存储（key: `${account}_rros_stock_pool`，按账号隔离），首次访问用硬编码 `DEFAULT_WATCHLIST` 初始化并写入 localStorage，后续支持增删改/star/分类切换
 - **分类管理**: 分类列表也持久化（key: `rros_stock_pool_categories`），支持自定义添加/删除空分类
 - **StockPool 组件**: 支持按分类 tab 筛选、添加股票（名称/拼音自动解析代码）、删除（hover 显示×）、star 标记（☆/★）、inline 分类切换下拉
 - **搜索集成**: 搜索框支持中文名称/拼音搜索，自动解析为股票代码。搜索框右侧按钮为"加入股票池"（替代旧收藏系统）
@@ -160,6 +175,13 @@ node test-scripts/test_percentile.mjs
 | `/api/watchlist` | POST | 保存当前账号股票池（需认证 header） |
 | `/api/analysis/list` | GET | 列出所有本地估值分析报告，按股票代码分组 |
 | `/api/analysis/:code` | GET | 读取某股票的估值分析报告内容（支持 `?type=` 过滤） |
+| `/api/dividend/:code` | GET | 获取个股股息率（最近一年累计现金分红 / 当前股价） |
+| `/api/proxy/klines` | GET | 代理个股 K 线（东方财富 / 腾讯 / Sina），避免前端 CORS/限流 |
+| `/api/etf/fund-flow/market?days=` | GET | 全市场 ETF 净流入趋势（亿元） |
+| `/api/etf/fund-flow/sector?days=` | GET | ETF 板块资金轮动（亿元） |
+| `/api/etf/fund-flow/detail?sector=` | GET | 单只 ETF 多窗口资金流向明细（1/7/14/30/90/180/365 日） |
+| `/api/etf/list` | GET | 热门 ETF 列表及当前行情 |
+| `/api/market/breadth/above-ma?index=&days=` | GET | 市场宽度：指数成分股站上 N 日均线的占比 |
 | `/health` | GET | 健康检查 |
 
 供前端（peistock）调用，支持查询任意股票（不限股票池）。**认证**：watchlist 和 analysis 端点需 `X-Account` 和 `X-Password` header，账号密码在 `config/accounts_hashed.json` 静态配置（bcrypt 哈希格式，由 `scripts/migrate_passwords.py` 从旧版 `accounts.json` 迁移生成）。其他端点公开访问。

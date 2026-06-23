@@ -47,6 +47,17 @@ npm run build
 - 指标叠加：MA5/10/20/60、BOLL 上轨/下轨、成交量
 - B/S 信号标记（底背离、顶背离、恐慌、贪婪）
 
+### 市场宽度（2026-06-23）
+- 沪深300 成分股站上 40 周均线（200 日等效）的占比
+- 双 Y 轴图：占比 + 沪深300 收盘价
+- 数据来自 RebelResearchOS `/api/market/breadth/above-ma`
+
+### ETF 资金流向（2026-06-23）
+- 全市场 ETF 净流入趋势图（每日净流入 + 累计净流入）
+- ETF 板块资金轮动图（左右对称条形图）
+- 单只 ETF 多窗口（1/7/14/30/90/180/365 日）资金流向明细表，默认折叠
+- 数据来自 RebelResearchOS `/api/etf/fund-flow/*`
+
 ### AI 投研分析
 - 搜索股票触发五角色链分析（Bull / Bear / Preemption / Sentiment / Chair）
 - 结果以卡片轮播展示，支持章节导航
@@ -92,6 +103,10 @@ src/
 │   ├── StockSearch.tsx        搜索 + AI 分析结果
 │   ├── StockChart.tsx         K 线图（ECharts）
 │   ├── StockChartsSection.tsx  多时间框架图表区
+│   ├── MarketBreadthPanel.tsx  沪深300 市场宽度面板
+│   ├── ETFMarketFlowPanel.tsx    ETF 全市场净流入趋势面板
+│   ├── ETFSectorFlowPanel.tsx    ETF 板块资金轮动面板
+│   ├── ETFFundFlowDetailTable.tsx  ETF 单只资金流向明细表（默认折叠）
 │   ├── ReportHistory.tsx      历史 AI 报告对比表格
 │   ├── SignalBacktestPanel.tsx 信号级回测看板
 │   ├── ValuationReportPanel.tsx 估值报告面板（全屏阅读器）
