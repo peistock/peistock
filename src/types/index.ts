@@ -17,6 +17,7 @@ export interface IndicatorData {
   emahs: number | null;        // 指数换手成本 EMA
   costDiff: number | null;     // 成本差
   costDeviation: number | null; // 成本偏离度 (股价 - EMAHS)
+  emaHsCrossTarget: number | null; // 明天收盘价达到该值时 EMAHS = MAHS
   // CRI综合风险指标（基于历史数据，非前瞻性）- 恐慌专用
   cri: number | null;          // Composite Risk Indicator (0-100)
   criPercentile: number | null; // CRI历史分位数 (0-100)
@@ -84,6 +85,60 @@ export interface IndicatorData {
   // OBV能量潮
   obv: number | null;
   obvMa20: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// ETF 资金流向
+// ---------------------------------------------------------------------------
+
+export interface ETFMarketFlowData {
+  dates: string[];
+  inflow: number[];
+  cumulative: number[];
+  latest_date?: string;
+}
+
+export interface ETFSectorFlowData {
+  sectors: string[];
+  inflow: number[];
+  latest_date?: string;
+}
+
+export interface MarketBreadthData {
+  dates: string[];
+  above_ratio: number[];
+  index_close: number[];
+}
+
+export interface ETFListItem {
+  code: string;
+  name: string;
+  category: string;
+  price: number;
+  shares: number;
+  nav: number;
+  trade_date: string;
+}
+
+export interface ETFWindowFlow {
+  flow: number;
+  change_rate: number | null;
+}
+
+export interface ETFFundFlowDetailItem {
+  code: string;
+  name: string;
+  category: string;
+  scale: number;
+  windows: {
+    '1': ETFWindowFlow;
+    '7': ETFWindowFlow;
+    '14': ETFWindowFlow;
+    '30': ETFWindowFlow;
+    '90': ETFWindowFlow;
+    '180': ETFWindowFlow;
+    '365': ETFWindowFlow;
+  };
 }
 
 export interface StockInfo {

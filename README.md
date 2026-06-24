@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-Vite 开发服务器默认运行在 `http://localhost:5173`，API 请求通过 Vite 代理转发到 `http://localhost:8000`。
+Vite 开发服务器默认运行在 `http://localhost:5173`，API 请求通过 Vite 代理转发到 `http://localhost:8002`。
 
 ## 构建
 
@@ -31,7 +31,7 @@ npm run build
 
 | 文件 | 用途 |
 |------|------|
-| `.env.development` | 本地开发：`VITE_RESEARCH_API_BASE=/api/research`（经 Vite 代理到 localhost:8000） |
+| `.env.development` | 本地开发：`VITE_RESEARCH_API_BASE=/api/research`（经 Vite 代理到 localhost:8002） |
 | `.env.production` | 生产环境：`VITE_RESEARCH_API_BASE=https://research.peistock.win` |
 
 ## 功能模块
@@ -44,8 +44,21 @@ npm run build
 
 ### K 线图
 - 日 K / 周 K / 月 K 切换
-- 指标叠加：MA5/10/20/60、BOLL 上轨/下轨、成交量
+- 指标叠加：MA5/10/20/60、BOLL 上轨/下轨、成交量、MAHS/EMAHS、OBV、PVT
 - B/S 信号标记（底背离、顶背离、恐慌、贪婪）
+- **EMAHS 穿越目标价（2026-06-24）**：倒算明天收盘价达到多少时 EMAHS = MAHS；目标价在 K 线可见范围内时标注在今日 K 线上，超出范围时在日 K 线头部 `DD` 旁显示数值，tooltip 同步展示
+- 抵扣价标注（MA20/MA60/MA225）
+
+### 市场宽度（2026-06-23）
+- 沪深300 成分股站上 40 周均线（200 日等效）的占比
+- 双 Y 轴图：占比 + 沪深300 收盘价
+- 数据来自 RebelResearchOS `/api/market/breadth/above-ma`
+
+### ETF 资金流向（2026-06-23）
+- 全市场 ETF 净流入趋势图（每日净流入 + 累计净流入），顶部显示价格最新数据日期
+- ETF 板块资金轮动图（左右对称条形图），时间窗口统一为 `1日/7日/14日/30日/90日/180日/1年`
+- 单只 ETF 多窗口（1/7/14/30/90/180/365 日）资金流向明细表，默认折叠
+- 数据来自 RebelResearchOS `/api/etf/fund-flow/*`
 
 ### AI 投研分析
 - 搜索股票触发五角色链分析（Bull / Bear / Preemption / Sentiment / Chair）
@@ -92,6 +105,10 @@ src/
 │   ├── StockSearch.tsx        搜索 + AI 分析结果
 │   ├── StockChart.tsx         K 线图（ECharts）
 │   ├── StockChartsSection.tsx  多时间框架图表区
+│   ├── MarketBreadthPanel.tsx  沪深300 市场宽度面板
+│   ├── ETFMarketFlowPanel.tsx    ETF 全市场净流入趋势面板
+│   ├── ETFSectorFlowPanel.tsx    ETF 板块资金轮动面板
+│   ├── ETFFundFlowDetailTable.tsx  ETF 单只资金流向明细表（默认折叠）
 │   ├── ReportHistory.tsx      历史 AI 报告对比表格
 │   ├── SignalBacktestPanel.tsx 信号级回测看板
 │   ├── ValuationReportPanel.tsx 估值报告面板（全屏阅读器）

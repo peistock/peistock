@@ -71,6 +71,57 @@ export function calculateEMAHS(closes: number[], dd: number[]): (number | null)[
   return result;
 }
 
+
+/**
+ * 倒算使明天 EMAHS = MAHS 的收盘价目标
+ *
+ * 假设明天 DD 与今天相同（成交量持平），推导：
+ * MAHS_tomorrow(p) = (MAHS_today × d − c_{n−d}) / d + p / d
+ * EMAHS_tomorrow(p) = (p − EMAHS_today) × 2/(d+1) + EMAHS_today
+ * 令两者相等，解得：
+ * p = MAHS_today × d × (d+1)/(d−1) − EMAHS_today × d − c_{n−d} × (d+1)/(d−1)
+ *
+ * 当历史数据不足完整 DD 周期时，按实际有效周期 min(d, i+1) 近似计算。
+ *
+ * @returns 每个交易日对应的目标价数组；无法计算或异常值为 null
+ */
+export function calculateEmaHsCrossTarget(
+  closes: number[],
+  dd: number[],
+  mahs: (number | null)[],
+  emahs: (number | null)[]
+): (number | null)[] {
+  const n = closes.length;
+  const targets: (number | null)[] = new Array(n).fill(null);
+
+  for (let i = 0; i < n; i++) {
+    const d = dd[i];
+    const m = mahs[i];
+    const e = emahs[i];
+
+    if (d <= 1 || m === null || e === null) continue;
+
+    // 历史数据不足时按实际有效周期近似
+    const effectivePeriod = Math.min(d, i + 1);
+    if (effectivePeriod <= 1) continue;
+
+    const oldestIdx = i - effectivePeriod + 1;
+    if (oldestIdx < 0) continue;
+
+    const oldestClose = closes[oldestIdx];
+    const factor = (effectivePeriod + 1) / (effectivePeriod - 1);
+    const target = m * effectivePeriod * factor - e * effectivePeriod - oldestClose * factor;
+
+    // 过滤异常值：非正 或 偏离当前价 10 倍以上
+    if (target > 0 && target < closes[i] * 10) {
+      targets[i] = parseFloat(target.toFixed(1));
+    }
+  }
+
+  return targets;
+}
+
+
 /**
  * 计算Yang-Zhang历史波动率（YZ Vol）
  * YZ Vol同时考虑了隔夜跳空和日内波动，比传统波动率更准确
@@ -1061,6 +1112,9 @@ export function calculateAllIndicators(
     if (m === null) return null;
     return closes[i] - m;
   });
+
+  // 5.5 倒算明天 EMAHS = MAHS 的目标收盘价
+  const emaHsCrossTarget = calculateEmaHsCrossTarget(closes, dd, mahs, emahs);
   
   // 6. 计算均线系统
   const ma5 = calculateSMA(closes, 5);
@@ -1215,6 +1269,7 @@ export function calculateAllIndicators(
     emahs: emahs[i],
     costDiff: costDiff[i],
     costDeviation: costDeviation[i],
+    emaHsCrossTarget: emaHsCrossTarget[i],
     // 恐慌指标
     cri: criResult.cri[i],
     criPercentile: criResult.criPercentile[i],

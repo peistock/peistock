@@ -14,6 +14,7 @@ import BacktestPanel from './components/BacktestPanel';
 import SignalBacktestPanel from './components/SignalBacktestPanel';
 import ValuationReportPanel from './components/ValuationReportPanel';
 import CompanyHistoryPanel from './components/CompanyHistoryPanel';
+import SectorView from './components/SectorView';
 import type { ReportHistoryItem } from './utils/researchApi';
 import type { StockItem } from './data/watchlist';
 import { getStockPool, addToStockPool, migrateLegacyFavorites, loadWatchlistFromBackend, setSyncErrorHandler, clearSyncErrorHandler } from './data/watchlist';
@@ -46,6 +47,9 @@ function App() {
   const [loginInput, setLoginInput] = useState({ account: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [syncError, setSyncError] = useState('');
+
+  // 视图切换：个股 / 板块
+  const [activeView, setActiveView] = useState<'stock' | 'sector'>('stock');
 
   const refreshPool = useCallback(() => {
     setStockPool(getStockPool());
@@ -182,6 +186,30 @@ function App() {
             </div>
 
             <div className="flex items-center gap-4">
+              {/* 视图切换：个股 / 板块 */}
+              <div className="flex items-center gap-1 p-1 bg-[#0D1117] rounded-lg border border-[#30363D]/60">
+                <button
+                  onClick={() => setActiveView('stock')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    activeView === 'stock'
+                      ? 'bg-[#30363D] text-white'
+                      : 'text-[#8B949E] hover:text-white'
+                  }`}
+                >
+                  个股
+                </button>
+                <button
+                  onClick={() => setActiveView('sector')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    activeView === 'sector'
+                      ? 'bg-[#30363D] text-white'
+                      : 'text-[#8B949E] hover:text-white'
+                  }`}
+                >
+                  板块
+                </button>
+              </div>
+
               {/* 数据源选择器 */}
               <div className="relative" data-datasource-dropdown>
                 <button
@@ -331,9 +359,9 @@ function App() {
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Search Section */}
+      {activeView === 'stock' ? (
+        <main className="max-w-7xl mx-auto px-4 py-6">
+          {/* Search Section */}
         <section className="mb-6">
           <StockSearch
             onSearch={handleSearch}
@@ -481,7 +509,12 @@ function App() {
             <BacktestPanel code={stockData.stockInfo.symbol} />
           </section>
         )}
-      </main>
+        </main>
+      ) : (
+        <main className="max-w-7xl mx-auto px-4 py-6">
+          <SectorView />
+        </main>
+      )}
 
       {/* Footer */}
       {/* 登录弹窗 */}

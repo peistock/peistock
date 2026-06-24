@@ -227,3 +227,66 @@ export interface DividendYieldResponse {
 export async function getDividendYield(code: string): Promise<DividendYieldResponse> {
   return fetchJSON(`/dividend/${code}`);
 }
+
+// ---------------------------------------------------------------------------
+// ETF 资金流向
+// ---------------------------------------------------------------------------
+
+import type { ETFMarketFlowData, ETFSectorFlowData, ETFListItem, ETFFundFlowDetailItem, MarketBreadthData } from '@/types';
+
+export interface ETFMarketFlowResponse {
+  status: string;
+  data: ETFMarketFlowData;
+  message?: string;
+}
+
+export interface ETFSectorFlowResponse {
+  status: string;
+  data: ETFSectorFlowData;
+  message?: string;
+}
+
+export interface ETFListResponse {
+  status: string;
+  data: ETFListItem[];
+  message?: string;
+}
+
+/** 全市场 ETF 净流入趋势 */
+export async function getETFMarketFlow(days: number = 30): Promise<ETFMarketFlowResponse> {
+  return fetchJSON(`/etf/fund-flow/market?days=${days}`);
+}
+
+/** ETF 板块资金轮动 */
+export async function getETFSectorFlow(days: number = 7): Promise<ETFSectorFlowResponse> {
+  return fetchJSON(`/etf/fund-flow/sector?days=${days}`);
+}
+
+/** 热门 ETF 列表 */
+export async function getETFList(): Promise<ETFListResponse> {
+  return fetchJSON('/etf/list');
+}
+
+/** ETF 单只多窗口资金流向明细 */
+export interface ETFFundFlowDetailResponse {
+  status: string;
+  data: ETFFundFlowDetailItem[];
+  latest_date?: string;
+  message?: string;
+}
+
+export async function getETFFundFlowDetail(sector: string = ''): Promise<ETFFundFlowDetailResponse> {
+  const q = sector ? `?sector=${encodeURIComponent(sector)}` : '';
+  return fetchJSON(`/etf/fund-flow/detail${q}`);
+}
+
+export interface MarketBreadthResponse {
+  status: string;
+  data: MarketBreadthData;
+  message?: string;
+}
+
+/** 市场宽度：指数成分股站上 N 日均线的占比（默认沪深300 + 200日） */
+export async function getMarketBreadth(index: string = '000300', days: number = 200): Promise<MarketBreadthResponse> {
+  return fetchJSON(`/market/breadth/above-ma?index=${index}&days=${days}`);
+}

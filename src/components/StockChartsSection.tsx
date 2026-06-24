@@ -32,7 +32,7 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
   const [showEMAHS, setShowEMAHS] = useState(true);
   const [showMA, setShowMA] = useState(false);
   const [showVolumeTrend, setShowVolumeTrend] = useState(false);
-  const [showOBV, setShowOBV] = useState(true);
+  const [showPVT, setShowPVT] = useState(true);
   const [signalVersion, setSignalVersion] = useState<'strict' | 'loose'>('strict');
 
   const hasData = data.daily && data.weekly && data.min15;
@@ -86,6 +86,13 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
         const hasPVTBottomDivergence = pvtDivergence === 'bottom' && !isPriceHigh;
         const isADXStrongTrend = adx !== null && adx >= 40 && adxState === 'rising';
         const isADXWeakening = adx !== null && adx >= 40 && adxState === 'falling';
+
+        // ADX 方向判断（与趋势强度综合保持一致）
+        const plusDI = lastIndicator.plusDI ?? 0;
+        const minusDI = lastIndicator.minusDI ?? 0;
+        const diDiff = plusDI - minusDI;
+        const isADXBearish = diDiff < -5;
+        const adxDirectionLabel = isADXBearish ? '空头' : '多头';
 
         const getTrendLevel = () => {
           if (adx === null) return 'weak';
@@ -360,29 +367,29 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
           stateDesc = 'PVT顶背离+ADX弱，趋势不明，谨慎观望';
         } else if (isStrongTrend && adxRising) {
           marketState = 'normal';
-          stateTitle = 'ADX强趋势·上升';
+          stateTitle = isADXBearish ? 'ADX强趋势·空头上升' : 'ADX强趋势·上升';
           stateColor = '#03B172';
-          stateDesc = 'ADX强且上升，趋势强劲，可持股待涨';
+          stateDesc = isADXBearish ? 'ADX强且上升，但方向偏空，谨慎追跌' : 'ADX强且上升，趋势强劲，可持股待涨';
         } else if (isStrongTrend) {
           marketState = 'normal';
-          stateTitle = 'ADX强趋势';
+          stateTitle = isADXBearish ? 'ADX强趋势·空头' : 'ADX强趋势';
           stateColor = '#03B172';
-          stateDesc = 'ADX强趋势，可持股待涨，关注回调买入';
+          stateDesc = isADXBearish ? 'ADX强趋势但方向偏空，观望为主' : 'ADX强趋势，可持股待涨，关注回调买入';
         } else if (isMediumTrend && adxRising) {
           marketState = 'normal';
-          stateTitle = 'ADX多头·上升';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}·上升` : 'ADX多头·上升';
           stateColor = '#58A6FF';
-          stateDesc = 'ADX中等且上升，趋势转强，可积极操作';
+          stateDesc = isADXBearish ? 'ADX中等且上升，但方向偏空，谨慎操作' : 'ADX中等且上升，趋势转强，可积极操作';
         } else if (isMediumTrend && adxFalling) {
           marketState = 'normal';
-          stateTitle = 'ADX多头·回落';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}·回落` : 'ADX多头·回落';
           stateColor = '#E3B341';
-          stateDesc = 'ADX中等但回落，趋势减弱，谨慎追高';
+          stateDesc = isADXBearish ? 'ADX中等但回落，方向偏空，观望为主' : 'ADX中等但回落，趋势减弱，谨慎追高';
         } else if (isMediumTrend) {
           marketState = 'normal';
-          stateTitle = 'ADX多头';
+          stateTitle = isADXBearish ? `ADX${adxDirectionLabel}` : 'ADX多头';
           stateColor = '#58A6FF';
-          stateDesc = 'ADX中等趋势，可积极操作';
+          stateDesc = isADXBearish ? 'ADX中等趋势，方向偏空，谨慎操作' : 'ADX中等趋势，可积极操作';
         } else if (hasPVTBottomDivergence && adxRising) {
           marketState = 'normal';
           stateTitle = '底背离·ADX上升';
@@ -490,8 +497,8 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                     <Label htmlFor="vol-daily" className="text-[10px] text-[#8B949E] cursor-pointer">量</Label>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <Switch id="obv-daily" checked={showOBV} onCheckedChange={setShowOBV} className="data-[state=checked]:bg-[#6B7B8E] scale-75" />
-                    <Label htmlFor="obv-daily" className="text-[10px] text-[#8B949E] cursor-pointer">OBV</Label>
+                    <Switch id="pvt-daily" checked={showPVT} onCheckedChange={setShowPVT} className="data-[state=checked]:bg-[#D2A8FF] scale-75" />
+                    <Label htmlFor="pvt-daily" className="text-[10px] text-[#8B949E] cursor-pointer">PVT</Label>
                   </div>
                 </div>
               )}
@@ -499,6 +506,9 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                 <span className="text-white font-mono">{tfData.data.length}</span> 条数据
                 {tf === 'daily' && (
                   <span className="ml-2">DD: <span className="text-[#D2A8FF] font-mono">{lastIndicator?.dd?.toFixed(0) || '-'}</span></span>
+                )}
+                {tf === 'daily' && lastIndicator?.emaHsCrossTarget !== null && lastIndicator?.emaHsCrossTarget !== undefined && (
+                  <span className="ml-2">穿越目标: <span className="text-[#D2A8FF] font-mono">{lastIndicator.emaHsCrossTarget.toFixed(1)}</span></span>
                 )}
               </div>
             </div>
@@ -513,7 +523,7 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                     showEMAHS={tf === 'daily' && showEMAHS}
                     showMA={showMA}
                     showVolumeTrend={showVolumeTrend}
-                    showOBV={showOBV}
+                    showPVT={showPVT}
                     title=""
                     compact={tf !== 'daily'}
                     timeframe={tf}
@@ -630,77 +640,74 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                             const pvtDiv = lastIndicator?.pvtDivergence;
                             const slopeLevel = lastIndicator?.slopeLevel || 0;
                             const bias225 = lastIndicator?.bias225 ?? 0;
-                            let baseTrend = '';
-                            if (adx >= 40) baseTrend = 'strong';
-                            else if (adx >= 20) baseTrend = 'medium';
-                            else baseTrend = 'weak';
+                            const plusDI = lastIndicator?.plusDI ?? 0;
+                            const minusDI = lastIndicator?.minusDI ?? 0;
+
+                            // 强度层：ADX 只衡量趋势强度，不衡量方向
+                            const strength = adx >= 40 ? 'strong' : adx >= 20 ? 'medium' : 'weak';
+
+                            // 方向层：+DI / -DI 决定方向
+                            const diDiff = plusDI - minusDI;
+                            const direction = diDiff > 5 ? 'bull' : diDiff < -5 ? 'bear' : 'neutral';
+
+                            // 辅助信号
                             const isPriceAboveMA225 = bias225 > 0;
                             const isPriceBelowMA225 = bias225 < -5;
                             const hasTopDivergence = pvtDiv === 'top';
-                            const hasSlopePressureStrong = slopeLevel >= 2;
-                            const hasSlopePressureWeak = slopeLevel >= 1;
-                            const adxWeakening = adxState === 'falling';
-                            const adxRising = adxState === 'rising';
                             const hasBottomDivergence = pvtDiv === 'bottom';
+                            const hasSlopePressureWeak = slopeLevel >= 1;
+                            const adxRising = adxState === 'rising';
+                            const adxFalling = adxState === 'falling';
 
-                            if (baseTrend === 'strong' && !hasTopDivergence && !hasSlopePressureWeak && isPriceAboveMA225) {
-                              return <span className="text-[#03B172]">🔥 强多头</span>;
+                            // 最高优先级：背离风险/机会
+                            if (hasTopDivergence && adxFalling && isPriceAboveMA225) {
+                              return <span className="text-[#FF3435]">🚨 趋势反转</span>;
                             }
-                            if (baseTrend === 'strong' && isPriceBelowMA225) {
-                              return <span className="text-[#FF3435]">🔥 强空头</span>;
-                            }
-                            if (baseTrend === 'strong' && !hasTopDivergence && hasSlopePressureWeak && isPriceAboveMA225) {
-                              return <span className="text-[#58A6FF]">强多头·斜率弱压</span>;
-                            }
-                            if (baseTrend === 'medium' && adxRising && !hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
-                              return <span className="text-[#58A6FF]">📈 多头形成</span>;
-                            }
-                            if (baseTrend === 'medium' && isPriceBelowMA225) {
-                              return <span className="text-[#FF3435]">📉 空头形成</span>;
-                            }
-                            if (baseTrend === 'medium' && hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
-                              return <span className="text-[#E3B341]">多头·斜率弱压</span>;
-                            }
-                            if (baseTrend === 'medium' && !hasSlopePressureWeak && !hasTopDivergence && isPriceAboveMA225) {
-                              return <span className="text-[#E3B341]">📊 多头震荡</span>;
-                            }
-                            if (baseTrend === 'medium' && !isPriceAboveMA225 && !isPriceBelowMA225) {
-                              return <span className="text-[#8B949E]">趋势不明</span>;
-                            }
-                            if (baseTrend === 'strong' && hasTopDivergence && isPriceAboveMA225) {
+                            if (hasTopDivergence && strength === 'strong' && isPriceAboveMA225) {
                               return <span className="text-[#E3B341]">⚠️ 强转弱风险</span>;
                             }
-                            if (baseTrend === 'medium' && hasTopDivergence && isPriceAboveMA225) {
+                            if (hasTopDivergence && strength === 'medium' && isPriceAboveMA225) {
                               return <span className="text-[#FF3435]">⚠️ 顶背离风险</span>;
-                            }
-                            if (hasTopDivergence && adxWeakening && isPriceAboveMA225) {
-                              return <span className="text-[#FF3435]">🚨 趋势反转</span>;
                             }
                             if (hasBottomDivergence && adxRising && isPriceBelowMA225) {
                               return <span className="text-[#03B172]">✅ 底背离机会</span>;
                             }
-                            if (hasBottomDivergence && baseTrend !== 'weak' && isPriceBelowMA225) {
+                            if (hasBottomDivergence && strength !== 'weak' && isPriceBelowMA225) {
                               return <span className="text-[#58A6FF]">📊 底背离观察</span>;
                             }
-                            if (hasSlopePressureStrong && isPriceAboveMA225) {
-                              return <span className="text-[#E3B341]">📉 斜率压制</span>;
+
+                            // 强趋势
+                            if (strength === 'strong') {
+                              if (direction === 'bull') {
+                                return <span className="text-[#03B172]">🔥 强多头</span>;
+                              }
+                              if (direction === 'bear') {
+                                return <span className="text-[#FF3435]">🔥 强空头</span>;
+                              }
+                              return <span className="text-[#E3B341]">🔥 强趋势·方向不明</span>;
                             }
-                            if (adxWeakening && baseTrend === 'medium' && isPriceAboveMA225) {
-                              return <span className="text-[#E3B341]">📉 趋势减弱</span>;
+
+                            // 中等趋势
+                            if (strength === 'medium') {
+                              if (direction === 'bull') {
+                                return hasSlopePressureWeak
+                                  ? <span className="text-[#E3B341]">多头·斜率弱压</span>
+                                  : <span className="text-[#58A6FF]">📈 多头</span>;
+                              }
+                              if (direction === 'bear') {
+                                return <span className="text-[#FF3435]">📉 空头</span>;
+                              }
+                              return <span className="text-[#8B949E]">📊 趋势形成中</span>;
                             }
-                            if (adxWeakening && baseTrend === 'medium' && isPriceBelowMA225) {
-                              return <span className="text-[#8B949E]">📉 空头减弱</span>;
-                            }
-                            if (baseTrend === 'weak' && isPriceAboveMA225) {
+
+                            // 弱趋势 / 震荡
+                            if (direction === 'bull') {
                               return <span className="text-[#8B949E]">💤 多头整理</span>;
                             }
-                            if (baseTrend === 'weak' && isPriceBelowMA225) {
+                            if (direction === 'bear') {
                               return <span className="text-[#8B949E]">💤 空头整理</span>;
                             }
-                            if (baseTrend === 'weak') {
-                              return <span className="text-[#8B949E]">💤 震荡整理</span>;
-                            }
-                            return <span className="text-[#8B949E]">⚪ 观望</span>;
+                            return <span className="text-[#8B949E]">💤 震荡整理</span>;
                           })()}
                         </span>
                       </div>
