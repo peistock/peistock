@@ -17,6 +17,7 @@ export interface IndicatorData {
   emahs: number | null;        // 指数换手成本 EMA
   costDiff: number | null;     // 成本差
   costDeviation: number | null; // 成本偏离度 (股价 - EMAHS)
+  emaHsCrossTarget: number | null; // 明天收盘价达到该值时 EMAHS = MAHS
   // CRI综合风险指标（基于历史数据，非前瞻性）- 恐慌专用
   cri: number | null;          // Composite Risk Indicator (0-100)
   criPercentile: number | null; // CRI历史分位数 (0-100)

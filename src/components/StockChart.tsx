@@ -747,6 +747,31 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       }
     }
 
+    // 构建 EMAHS=MAHS 穿越目标价 markLine（仅今日）
+    const crossTargetData: echarts.MarkLineComponentOption['data'] = [];
+    if (lastIndex >= 0) {
+      const lastInd = indicators[lastIndex];
+      const target = lastInd?.emaHsCrossTarget;
+      if (target !== null && target !== undefined) {
+        const isGolden = target > lastInd.close;
+        crossTargetData.push({
+          xAxis: lastIndex,
+          yAxis: target,
+          lineStyle: { color: '#D2A8FF', type: 'dashed', width: 1 },
+          label: {
+            show: true,
+            formatter: `${isGolden ? '金叉' : '死叉'}目标\n${target.toFixed(2)}`,
+            position: 'end',
+            fontSize: 9,
+            color: '#D2A8FF',
+            backgroundColor: 'rgba(13,17,23,0.85)',
+            padding: [1, 3],
+            borderRadius: 1,
+          },
+        });
+      }
+    }
+
     const series: echarts.SeriesOption[] = [
       {
         name: 'K线',
@@ -763,6 +788,11 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           symbolSize: [1, 4],
           silent: true,
           data: [...deductMarkPoints, ...pvtDivergenceMarks],
+        },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: crossTargetData,
         },
       },
     ];
