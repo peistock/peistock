@@ -507,6 +507,9 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                 {tf === 'daily' && (
                   <span className="ml-2">DD: <span className="text-[#D2A8FF] font-mono">{lastIndicator?.dd?.toFixed(0) || '-'}</span></span>
                 )}
+                {tf === 'daily' && lastIndicator?.emaHsCrossTarget !== null && lastIndicator?.emaHsCrossTarget !== undefined && (
+                  <span className="ml-2">穿越目标: <span className="text-[#D2A8FF] font-mono">{lastIndicator.emaHsCrossTarget.toFixed(1)}</span></span>
+                )}
               </div>
             </div>
 
