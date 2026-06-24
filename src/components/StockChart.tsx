@@ -753,26 +753,32 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       const lastInd = indicators[lastIndex];
       const target = lastInd?.emaHsCrossTarget;
       if (target !== null && target !== undefined) {
-        const isGolden = target > lastInd.close;
-        crossTargetMarkPoints.push({
-          name: `${isGolden ? '金叉' : '死叉'}目标\n${target.toFixed(1)}`,
-          coord: [lastIndex, target],
-          value: target,
-          symbol: 'rect',
-          symbolSize: [1, 4],
-          itemStyle: { color: '#D2A8FF' },
-          label: {
-            show: true,
-            position: isGolden ? 'top' : 'bottom',
-            distance: 3,
-            fontSize: 8,
-            color: '#D2A8FF',
-            backgroundColor: 'rgba(13,17,23,0.85)',
-            padding: [0, 2],
-            borderRadius: 1,
-            borderWidth: 0,
-          },
-        });
+        // 若目标价落在当前 K 线可见范围外，不在图上画 markPoint，避免压扁整个 K 线图
+        const chartMaxHigh = Math.max(...stockData.map(d => d.high));
+        const chartMinLow = Math.min(...stockData.map(d => d.low));
+        const isInVisibleRange = target <= chartMaxHigh * 1.1 && target >= chartMinLow * 0.9;
+        if (isInVisibleRange) {
+          const isGolden = target > lastInd.close;
+          crossTargetMarkPoints.push({
+            name: `${isGolden ? '金叉' : '死叉'}目标\n${target.toFixed(1)}`,
+            coord: [lastIndex, target],
+            value: target,
+            symbol: 'rect',
+            symbolSize: [1, 4],
+            itemStyle: { color: '#D2A8FF' },
+            label: {
+              show: true,
+              position: isGolden ? 'top' : 'bottom',
+              distance: 3,
+              fontSize: 8,
+              color: '#D2A8FF',
+              backgroundColor: 'rgba(13,17,23,0.85)',
+              padding: [0, 2],
+              borderRadius: 1,
+              borderWidth: 0,
+            },
+          });
+        }
       }
     }
 
@@ -999,6 +1005,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           if (ind.mahs !== null && ind.mahs !== undefined) html += `<span>MAHS:</span><span style="color: #FF3435">${ind.mahs.toFixed(2)}</span>`;
           if (ind.emahs !== null && ind.emahs !== undefined) html += `<span>EMAHS:</span><span style="color: #03B172">${ind.emahs.toFixed(2)}</span>`;
           if (ind.costDiff !== null && ind.costDiff !== undefined) html += `<span>成本差:</span><span style="color: ${ind.costDiff >= 0 ? '#FF3435' : '#03B172'}">${ind.costDiff.toFixed(2)}</span>`;
+          if (ind.emaHsCrossTarget !== null && ind.emaHsCrossTarget !== undefined) {
+            const isGolden = ind.emaHsCrossTarget > stock.close;
+            html += `<span>穿越目标:</span><span style="color: ${isGolden ? '#D2A8FF' : '#D2A8FF'}">${ind.emaHsCrossTarget.toFixed(1)}</span>`;
+          }
           if (ind.cri !== null && ind.cri !== undefined) html += `<span>恐慌指数:</span><span style="color: #FF6B6B">${ind.cri.toFixed(1)}</span>`;
           if (ind.greedy !== null && ind.greedy !== undefined) html += `<span>贪婪指数:</span><span style="color: #03B172">${ind.greedy.toFixed(1)}</span>`;
           // 情绪指数暂时隐藏
