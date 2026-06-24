@@ -36,7 +36,19 @@
 | MA | 关 | 白/黄/紫/绿/红五条均线 |
 | 成交量趋势 | 关 | 灰色面积折线 |
 | OBV | 开 | 灰靛实线 + 虚线 MA20 |
+| PVT | 开 | 量价趋势，独立开关 |
 | BOLL | 始终显示 | 黄色虚线，不受任何开关控制 |
+
+#### 1.0 EMAHS 穿越 MAHS 目标价（2026-06-24 新增）
+- **计算**：`src/utils/indicators.ts` 新增 `calculateEmaHsCrossTarget(closes, dd, mahs, emahs)`，假设明天 DD 与今天相同，倒算使明天 `EMAHS = MAHS` 的收盘价
+  - 公式：`p = MAHS × d × (d+1)/(d−1) − EMAHS × d − c_{n−d} × (d+1)/(d−1)`
+  - 历史数据不足时按 `effectivePeriod = min(d, i+1)` 近似
+  - 目标价 ≤0 或偏离当前价 10 倍以上时置为 null
+- **展示**：
+  - 日 K 线头部 `DD: x` 后显示「穿越目标: xx.x」，精度 1 位小数
+  - 目标价落在当前 K 线可见范围（最高/最低价 ±10%）内时，在今日 K 线上用紫色 `markPoint` 标注「金叉目标 xx.x」或「死叉目标 xx.x」
+  - tooltip  hover 今日 K 线时同步显示「穿越目标: xx.x」
+- **同步**：`rebel_research/src/utils/indicators.ts` 与 `src/components/StockChart.tsx` 需保持 1:1 同步
 
 #### 1.1 市场宽度（2026-06-23 新增）
 - **位置**：`src/components/MarketBreadthPanel.tsx`，挂载在 `SectorView.tsx` 顶部
@@ -44,10 +56,10 @@
 - **口径**：沪深300成分股收盘价站上 40 周均线（200 日等效）的占比，双 Y 轴叠加沪深300收盘价
 - **状态**：默认展开，加载中显示 spinner
 
-#### 1.2 ETF 资金流向（2026-06-23 新增）
+#### 1.2 ETF 资金流向（2026-06-23 新增，2026-06-24 标签优化）
 - **走势/板块**：`src/components/ETFMarketFlowPanel.tsx`（走势）+ `ETFSectorFlowPanel.tsx`（板块轮动）
-  - `GET /api/etf/fund-flow/market?days=` 每日净流入柱状图 + 累计净流入折线
-  - `GET /api/etf/fund-flow/sector?days=` 左右对称板块轮动条形图
+  - `GET /api/etf/fund-flow/market?days=` 每日净流入柱状图 + 累计净流入折线；面板顶部显示价格最新数据日期 `latest_date`
+  - `GET /api/etf/fund-flow/sector?days=` 左右对称板块轮动条形图；时间窗口标签统一为 `1日/7日/14日/30日/90日/180日/1年`
 - **明细表**：`src/components/ETFFundFlowDetailTable.tsx`
   - 默认折叠，点击展开才请求 `GET /api/etf/fund-flow/detail?sector=`
   - 支持按 1/7/14/30/90/180/365 日窗口排序，显示净流入（亿元）和份额变化率
