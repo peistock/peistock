@@ -81,6 +81,8 @@ export function calculateEMAHS(closes: number[], dd: number[]): (number | null)[
  * 令两者相等，解得：
  * p = MAHS_today × d × (d+1)/(d−1) − EMAHS_today × d − c_{n−d} × (d+1)/(d−1)
  *
+ * 当历史数据不足完整 DD 周期时，按实际有效周期 min(d, i+1) 近似计算。
+ *
  * @returns 每个交易日对应的目标价数组；无法计算或异常值为 null
  */
 export function calculateEmaHsCrossTarget(
@@ -99,16 +101,20 @@ export function calculateEmaHsCrossTarget(
 
     if (d <= 1 || m === null || e === null) continue;
 
-    const oldestIdx = i - d + 1;
+    // 历史数据不足时按实际有效周期近似
+    const effectivePeriod = Math.min(d, i + 1);
+    if (effectivePeriod <= 1) continue;
+
+    const oldestIdx = i - effectivePeriod + 1;
     if (oldestIdx < 0) continue;
 
     const oldestClose = closes[oldestIdx];
-    const factor = (d + 1) / (d - 1);
-    const target = m * d * factor - e * d - oldestClose * factor;
+    const factor = (effectivePeriod + 1) / (effectivePeriod - 1);
+    const target = m * effectivePeriod * factor - e * effectivePeriod - oldestClose * factor;
 
     // 过滤异常值：非正 或 偏离当前价 10 倍以上
     if (target > 0 && target < closes[i] * 10) {
-      targets[i] = parseFloat(target.toFixed(3));
+      targets[i] = parseFloat(target.toFixed(1));
     }
   }
 
