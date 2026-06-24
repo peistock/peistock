@@ -40,7 +40,7 @@
 | BOLL | 始终显示 | 黄色虚线，不受任何开关控制 |
 
 #### 1.0 EMAHS 穿越 MAHS 目标价（2026-06-24 新增）
-- **计算**：`src/utils/indicators.ts` 新增 `calculateEmaHsCrossTarget(closes, dd, mahs, emahs)`，假设明天 DD 与今天相同，倒算使明天 `EMAHS = MAHS` 的收盘价
+- **计算**：`src/utils/indicators.ts` 新增 `calculateEmaHsCrossTarget(closes, dd, mahs, emahs)`，假设下一交易日 DD 与当前交易日相同，倒算使下一交易日 `EMAHS = MAHS` 的收盘价
   - 公式：`p = MAHS × d × (d+1)/(d−1) − EMAHS × d − c_{n−d} × (d+1)/(d−1)`
   - 历史数据不足时按 `effectivePeriod = min(d, i+1)` 近似
   - 目标价 ≤0 或偏离当前价 10 倍以上时置为 null
