@@ -94,11 +94,13 @@ export interface ETFMarketFlowData {
   dates: string[];
   inflow: number[];
   cumulative: number[];
+  latest_date?: string;
 }
 
 export interface ETFSectorFlowData {
   sectors: string[];
   inflow: number[];
+  latest_date?: string;
 }
 
 export interface MarketBreadthData {

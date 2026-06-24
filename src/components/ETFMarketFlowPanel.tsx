@@ -16,7 +16,7 @@ function getYearToDateDays(): number {
 }
 
 const TIME_OPTIONS: TimeOption[] = [
-  { label: '1日', days: 2 },
+  { label: '1日', days: 1 },
   { label: '1周', days: 7 },
   { label: '1月', days: 30 },
   { label: '3月', days: 90 },
@@ -162,6 +162,9 @@ export default function ETFMarketFlowPanel() {
         <div className="flex items-center gap-2">
           <BarChart3 className="w-4 h-4 text-[#58A6FF]" />
           <span className="text-sm text-[#C9D1D9]">ETF 市场净流入走势</span>
+          {data?.latest_date && (
+            <span className="text-[10px] text-[#8B949E] font-mono">({data.latest_date})</span>
+          )}
           {latestCumulative !== null && (
             <span className={`text-xs font-mono ${latestCumulative >= 0 ? 'text-[#03B172]' : 'text-[#FF3435]'}`}>
               {formatYi(latestCumulative)}

@@ -271,6 +271,7 @@ export async function getETFList(): Promise<ETFListResponse> {
 export interface ETFFundFlowDetailResponse {
   status: string;
   data: ETFFundFlowDetailItem[];
+  latest_date?: string;
   message?: string;
 }
 

@@ -46,6 +46,7 @@ function formatRate(v: number | null): string {
 export default function ETFFundFlowDetailTable() {
   const [sector, setSector] = useState('全部');
   const [data, setData] = useState<ETFFundFlowDetailItem[]>([]);
+  const [latestDate, setLatestDate] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sortKey, setSortKey] = useState<WindowKey>('7');
@@ -60,8 +61,10 @@ export default function ETFFundFlowDetailTable() {
     getETFFundFlowDetail(sector === '全部' ? '' : sector)
       .then((res) => {
         if (cancelled) return;
-        if (res.status === 'ok') setData(res.data);
-        else setError(res.message || '数据异常');
+        if (res.status === 'ok') {
+          setData(res.data);
+          setLatestDate(res.latest_date);
+        } else setError(res.message || '数据异常');
       })
       .catch((e) => {
         if (!cancelled) setError(e.message || '加载失败');
@@ -106,6 +109,9 @@ export default function ETFFundFlowDetailTable() {
           )}
           <Table2 className="w-4 h-4 text-[#58A6FF]" />
           <span className="text-sm text-[#C9D1D9]">ETF 资金流向明细</span>
+          {latestDate && (
+            <span className="text-[10px] text-[#8B949E] font-mono">({latestDate})</span>
+          )}
         </button>
 
         {expanded && (

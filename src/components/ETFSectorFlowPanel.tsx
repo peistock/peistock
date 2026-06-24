@@ -15,14 +15,13 @@ function getYearToDateDays(): number {
 }
 
 const TIME_OPTIONS: TimeOption[] = [
-  { label: '最近1日', days: 2 },
+  { label: '1日', days: 1 },
   { label: '1周', days: 7 },
-  { label: '2周', days: 14 },
   { label: '1月', days: 30 },
   { label: '3月', days: 90 },
   { label: '6月', days: 180 },
   { label: '今年来', days: getYearToDateDays() },
-  { label: '12月', days: 365 },
+  { label: '1年', days: 365 },
 ];
 
 function formatYi(value: number): string {
@@ -92,6 +91,9 @@ export default function ETFSectorFlowPanel() {
         <div className="flex items-center gap-2">
           <PieChart className="w-4 h-4 text-[#58A6FF]" />
           <span className="text-sm text-[#C9D1D9]">ETF 资金轮动（单位：亿元）</span>
+          {data?.latest_date && (
+            <span className="text-[10px] text-[#8B949E] font-mono">({data.latest_date})</span>
+          )}
         </div>
 
         <div className="flex items-center gap-1">
