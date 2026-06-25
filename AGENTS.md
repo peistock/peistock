@@ -39,15 +39,18 @@
 | PVT | 开 | 量价趋势，独立开关 |
 | BOLL | 始终显示 | 黄色虚线，不受任何开关控制 |
 
-#### 1.0 EMAHS 穿越 MAHS 目标价（2026-06-24 新增）
+#### 1.0 EMAHS 穿越 MAHS 目标价（2026-06-24 新增，2026-06-25 展示升级）
 - **计算**：`src/utils/indicators.ts` 新增 `calculateEmaHsCrossTarget(closes, dd, mahs, emahs)`，假设下一交易日 DD 与当前交易日相同，倒算使下一交易日 `EMAHS = MAHS` 的收盘价
   - 公式：`p = MAHS × d × (d+1)/(d−1) − EMAHS × d − c_{n−d} × (d+1)/(d−1)`
   - 历史数据不足时按 `effectivePeriod = min(d, i+1)` 近似
-  - 目标价 ≤0 或偏离当前价 10 倍以上时置为 null
+  - 仅过滤非数字异常值，保留 ≤0 及偏离当前价 10 倍以上的极端值
 - **展示**：
-  - 日 K 线头部 `DD: x` 后显示「穿越目标: xx.x」，精度 1 位小数
-  - 目标价落在当前 K 线可见范围（最高/最低价 ±10%）内时，在今日 K 线上用紫色 `markPoint` 标注「金叉目标 xx.x」或「死叉目标 xx.x」
-  - tooltip  hover 今日 K 线时同步显示「穿越目标: xx.x」
+  - 日 K 线头部 `DD: x` 后显示「穿越目标: xx.x」或「穿越目标: 无」，精度 1 位小数
+  - 主图新增紫色虚线「穿越目标」series，以相对当天收盘价的百分比偏离绘制，挂载右侧独立 y 轴，y 轴范围按该股数据动态取整
+  - tooltip hover 时显示「穿越目标: ±xx.x% (xx.x)」，括号内为绝对目标价
+  - 今日 K 线上仍用紫色 `markPoint` 标注「金叉目标 xx.x」或「死叉目标 xx.x」
+  - 主图 K 线采用对数坐标，y 轴范围按该股实际最高/最低价动态取整，避免上下留白
+- **用法**：穿越目标主要观察拐点和极端偏离；从极端值向 0 回归意味着 EMAHS 与 MAHS 收敛，趋势可能减速或转折，具体方向需结合 K 线、成交量、ADX 等判断
 - **同步**：`rebel_research/src/utils/indicators.ts` 与 `src/components/StockChart.tsx` 需保持 1:1 同步
 
 #### 1.1 市场宽度（2026-06-23 新增）

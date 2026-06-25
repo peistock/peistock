@@ -112,8 +112,8 @@ export function calculateEmaHsCrossTarget(
     const factor = (effectivePeriod + 1) / (effectivePeriod - 1);
     const target = m * effectivePeriod * factor - e * effectivePeriod - oldestClose * factor;
 
-    // 过滤异常值：非正 或 偏离当前价 10 倍以上
-    if (target > 0 && target < closes[i] * 10) {
+    // 只过滤非数字异常，保留极端值（包括 <=0 和偏离 10 倍以上）
+    if (Number.isFinite(target)) {
       targets[i] = parseFloat(target.toFixed(1));
     }
   }

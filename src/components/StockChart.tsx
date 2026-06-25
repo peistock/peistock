@@ -106,6 +106,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const bias225PercentileData = alignedIndicators.map(d => d.bias225Percentile);
     const pvtDivergenceData = alignedIndicators.map(d => d.pvtDivergence);
     const pvtData = alignedIndicators.map(d => d.pvt);
+    const emaHsCrossTargetData = alignedIndicators.map(d => d.emaHsCrossTarget);
 
     // 计算抵扣价标注数据
     const lastIndex = alignedIndicators.length - 1;
@@ -880,7 +881,25 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     if (showEMAHS) {
       series.push({ name: 'EMAHS', type: 'line', data: emahsData, smooth: true, lineStyle: { width: 2, color: '#03B172', type: 'dashed' }, symbol: 'none' });
     }
-    
+
+    // 穿越目标价连线（EMAHS=MAHS 倒算目标）
+    // 以相对当天收盘价的百分比偏离绘制，避免绝对价格极值压扁主图
+    const crossTargetLineData = emaHsCrossTargetData.map((target, i) => {
+      if (target === null || target === undefined) return null;
+      const close = alignedStockData[i]?.close;
+      if (!close) return null;
+      return parseFloat(((target / close - 1) * 100).toFixed(2));
+    });
+    series.push({
+      name: '穿越目标',
+      type: 'line',
+      data: crossTargetLineData,
+      smooth: false,
+      lineStyle: { width: 1, color: '#D2A8FF', type: 'dashed' },
+      symbol: 'none',
+      yAxisIndex: 6,
+    });
+
     // 添加CRI（恐慌）、贪婪得分和综合情绪指数到副图 - 所有时间周期都显示
     // 恐慌指标（CRI）- 红色
     series.push({
@@ -930,6 +949,18 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       yAxisIndex: 4,
     });
 
+    // 根据该股穿越目标数据动态计算 y 轴范围（±5% 边距）
+    const crossTargetValues = crossTargetLineData.filter((v): v is number => v !== null);
+    const crossTargetDataMin = crossTargetValues.length > 0 ? Math.min(...crossTargetValues) : -100;
+    const crossTargetDataMax = crossTargetValues.length > 0 ? Math.max(...crossTargetValues) : 100;
+    const crossTargetPadding = (crossTargetDataMax - crossTargetDataMin) * 0.05 || 1;
+
+    // 根据实际 K 线数据动态计算对数 y 轴范围，避免上下留白过多和 K 线穿出
+    const klineMin = Math.min(...alignedStockData.map(d => d.low));
+    const klineMax = Math.max(...alignedStockData.map(d => d.high));
+    const klineLogMin = Math.max(Math.floor(klineMin * 0.95), 0.01);
+    const klineLogMax = Math.ceil(klineMax * 1.05);
+
     const option: echarts.EChartsOption = {
       backgroundColor: 'transparent',
       animation: true,
@@ -953,6 +984,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
               { name: 'MA225', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: 'MAHS', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: 'EMAHS', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '穿越目标', icon: 'rect', itemStyle: { color: '#D2A8FF' } },
               { name: '成交量趋势', icon: 'rect', itemStyle: { color: '#8B949E' } },
               { name: 'OBV', icon: 'rect', itemStyle: { color: '#6B7B8E' } },
               { name: 'OBV_MA20', icon: 'rect', itemStyle: { color: '#6B7B8E' } },
@@ -972,6 +1004,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
               { name: 'MA225', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: 'MAHS', icon: 'rect', itemStyle: { color: '#FF3435' } },
               { name: 'EMAHS', icon: 'rect', itemStyle: { color: '#03B172' } },
+              { name: '穿越目标', icon: 'rect', itemStyle: { color: '#D2A8FF' } },
               { name: '恐慌指数', icon: 'rect', itemStyle: { color: '#FF6B6B' } },
               { name: '贪婪指数', icon: 'rect', itemStyle: { color: '#03B172' } },
               { name: '成本偏离度', icon: 'rect', itemStyle: { color: '#E3B341' } },
@@ -1017,8 +1050,9 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           if (ind.emahs !== null && ind.emahs !== undefined) html += `<span>EMAHS:</span><span style="color: #03B172">${ind.emahs.toFixed(2)}</span>`;
           if (ind.costDiff !== null && ind.costDiff !== undefined) html += `<span>成本差:</span><span style="color: ${ind.costDiff >= 0 ? '#FF3435' : '#03B172'}">${ind.costDiff.toFixed(2)}</span>`;
           if (ind.emaHsCrossTarget !== null && ind.emaHsCrossTarget !== undefined) {
-            const isGolden = ind.emaHsCrossTarget > stock.close;
-            html += `<span>穿越目标:</span><span style="color: ${isGolden ? '#D2A8FF' : '#D2A8FF'}">${ind.emaHsCrossTarget.toFixed(1)}</span>`;
+            const crossTargetPct = (ind.emaHsCrossTarget / stock.close - 1) * 100;
+            const crossTargetColor = crossTargetPct >= 0 ? '#D2A8FF' : '#D2A8FF';
+            html += `<span>穿越目标:</span><span style="color: ${crossTargetColor}">${crossTargetPct >= 0 ? '+' : ''}${crossTargetPct.toFixed(1)}% (${ind.emaHsCrossTarget.toFixed(1)})</span>`;
           }
           if (ind.cri !== null && ind.cri !== undefined) html += `<span>恐慌指数:</span><span style="color: #FF6B6B">${ind.cri.toFixed(1)}</span>`;
           if (ind.greedy !== null && ind.greedy !== undefined) html += `<span>贪婪指数:</span><span style="color: #03B172">${ind.greedy.toFixed(1)}</span>`;
@@ -1069,7 +1103,9 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       ],
       yAxis: [
         {
-          scale: true,
+          type: 'log',
+          min: klineLogMin,
+          max: klineLogMax,
           splitArea: { show: false },
           axisLine: { lineStyle: { color: '#30363D' } },
           axisLabel: { color: '#8B949E' },
@@ -1141,6 +1177,17 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           scale: true,
           axisLabel: { show: false, color: '#8B949E', fontSize: 10 },
           axisLine: { show: true, lineStyle: { color: '#8B949E' } },
+          splitLine: { show: false },
+        },
+        {
+          type: 'value',
+          gridIndex: 0,
+          position: 'right',
+          offset: 100,
+          min: crossTargetDataMin - crossTargetPadding,
+          max: crossTargetDataMax + crossTargetPadding,
+          axisLabel: { show: false },
+          axisLine: { show: true, lineStyle: { color: '#D2A8FF' } },
           splitLine: { show: false },
         },
       ],

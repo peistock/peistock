@@ -193,6 +193,12 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                     <div className="font-bold text-white mb-1">成本差</div>
                     <p className="text-xs text-[#8B949E]">短期成本与长期成本的偏离程度，用于判断资金进出动向。</p>
                   </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">穿越目标 (EMAHS=MAHS)</div>
+                    <p className="text-xs text-[#8B949E]">
+                      倒算明天收盘价需要达到多少，才能让明天的 EMAHS 等于 MAHS。图中以相对当天收盘价的百分比偏离绘制（紫色虚线，右侧独立坐标轴）。主要观察其拐点和极端值：从极端值向 0 回归，意味着两条成本线在收敛，趋势可能减速或转折；具体方向需结合 K 线、成交量、ADX 等指标综合判断。
+                    </p>
+                  </div>
                 </div>
               </section>
 
@@ -392,6 +398,7 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                     <p>2. 系统自动计算换手成本 MAHS/EMAHS</p>
                     <p>3. 观察 CRI 恐慌指数和贪婪指数</p>
                     <p>4. 结合三周期（日K/周K/15分钟）综合判断</p>
+                    <p>5. 关注穿越目标的拐点，辅助判断趋势收敛与转折</p>
                   </div>
                 </div>
               </section>
@@ -422,6 +429,24 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                   <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
                     <div className="font-bold text-white mb-1">斜率因子</div>
                     <p className="text-xs text-[#8B949E]">MA20/MA60/MA225未来5日预期斜率，评估趋势压力</p>
+                  </div>
+                  <div className="p-3 bg-[#0D1117] rounded-lg border border-[#30363D]">
+                    <div className="font-bold text-white mb-1">穿越目标 (EMAHS=MAHS)</div>
+                    <p className="text-xs text-[#8B949E]">明天收盘价达到该值时 EMAHS 与 MAHS 相交。图中为相对当天收盘价的百分比偏离，紫色虚线</p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <SectionTitle icon={BarChart3} title="K 线图说明" color="text-[#D2A8FF]" />
+                <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
+                  <p className="text-sm text-[#C9D1D9] mb-3">
+                    主图 K 线采用对数坐标，y 轴范围根据该股实际价格动态调整。
+                  </p>
+                  <div className="space-y-2 text-xs text-[#8B949E]">
+                    <p>• 对数坐标下，相同百分比涨跌显示为相同的垂直距离，更适合观察长期趋势</p>
+                    <p>• 副图显示恐慌指数、贪婪指数、成本偏离度等辅助指标</p>
+                    <p>• 鼠标悬停可查看详细数据，包括穿越目标的百分比和绝对目标价</p>
                   </div>
                 </div>
               </section>

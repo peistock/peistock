@@ -507,8 +507,22 @@ export default function StockChartsSection({ data }: StockChartsSectionProps) {
                 {tf === 'daily' && (
                   <span className="ml-2">DD: <span className="text-[#D2A8FF] font-mono">{lastIndicator?.dd?.toFixed(0) || '-'}</span></span>
                 )}
-                {tf === 'daily' && lastIndicator?.emaHsCrossTarget !== null && lastIndicator?.emaHsCrossTarget !== undefined && (
-                  <span className="ml-2">穿越目标: <span className="text-[#D2A8FF] font-mono">{lastIndicator.emaHsCrossTarget.toFixed(1)}</span></span>
+                {tf === 'daily' && (
+                  <span
+                    className="ml-2"
+                    title={
+                      lastIndicator?.emaHsCrossTarget !== null && lastIndicator?.emaHsCrossTarget !== undefined
+                        ? `目标价 ${lastIndicator.emaHsCrossTarget.toFixed(1)} 为明天 EMAHS=MAHS 的倒算价格（极端值已保留）`
+                        : '目标价无效：DD≤1 或倒算结果非数字'
+                    }
+                  >
+                    穿越目标:{' '}
+                    {lastIndicator?.emaHsCrossTarget !== null && lastIndicator?.emaHsCrossTarget !== undefined ? (
+                      <span className="text-[#D2A8FF] font-mono">{lastIndicator.emaHsCrossTarget.toFixed(1)}</span>
+                    ) : (
+                      <span className="text-[#8B949E] font-mono">无</span>
+                    )}
+                  </span>
                 )}
               </div>
             </div>
