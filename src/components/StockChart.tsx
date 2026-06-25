@@ -1033,10 +1033,17 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           let html = `<div style="font-family: JetBrains Mono; font-size: 12px;">`;
           html += `<div style="color: #8B949E; margin-bottom: 4px;">${stock.date}</div>`;
           html += `<div style="display: grid; grid-template-columns: auto auto; gap: 8px 16px;">`;
-          html += `<span>开盘:</span><span style="color: ${stock.open > stock.close ? '#03B172' : '#FF3435'}">${stock.open.toFixed(2)}</span>`;
-          html += `<span>最高:</span><span style="color: #FF3435">${stock.high.toFixed(2)}</span>`;
-          html += `<span>最低:</span><span style="color: #03B172">${stock.low.toFixed(2)}</span>`;
-          html += `<span>收盘:</span><span style="color: ${stock.close >= stock.open ? '#FF3435' : '#03B172'}">${stock.close.toFixed(2)}</span>`;
+          if (stock.close > 0) {
+            html += `<span>开盘:</span><span style="color: ${stock.open > stock.close ? '#03B172' : '#FF3435'}">${stock.open.toFixed(2)}</span>`;
+            html += `<span>最高:</span><span style="color: #FF3435">${stock.high.toFixed(2)}</span>`;
+            html += `<span>最低:</span><span style="color: #03B172">${stock.low.toFixed(2)}</span>`;
+            html += `<span>收盘:</span><span style="color: ${stock.close >= stock.open ? '#FF3435' : '#03B172'}">${stock.close.toFixed(2)}</span>`;
+          } else {
+            html += `<span>开盘:</span><span style="color: #8B949E">异常</span>`;
+            html += `<span>最高:</span><span style="color: #8B949E">异常</span>`;
+            html += `<span>最低:</span><span style="color: #8B949E">异常</span>`;
+            html += `<span>收盘:</span><span style="color: #8B949E">异常</span>`;
+          }
           html += `<span>成交量:</span><span>${(stock.volume / 10000).toFixed(2)}万</span>`;
           if (ind.obv !== null && ind.obv !== undefined) html += `<span>OBV:</span><span style="color: #6B7B8E">${ind.obv.toFixed(2)}</span>`;
           if (ind.obvMa20 !== null && ind.obvMa20 !== undefined) html += `<span>OBV_MA20:</span><span style="color: #6B7B8E">${ind.obvMa20.toFixed(2)}</span>`;
@@ -1044,9 +1051,12 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
           if (ind.emahs !== null && ind.emahs !== undefined) html += `<span>EMAHS:</span><span style="color: #03B172">${ind.emahs.toFixed(2)}</span>`;
           if (ind.costDiff !== null && ind.costDiff !== undefined) html += `<span>成本差:</span><span style="color: ${ind.costDiff >= 0 ? '#FF3435' : '#03B172'}">${ind.costDiff.toFixed(2)}</span>`;
           if (ind.emaHsCrossTarget !== null && ind.emaHsCrossTarget !== undefined) {
-            const crossTargetPct = (ind.emaHsCrossTarget / stock.close - 1) * 100;
-            const crossTargetColor = crossTargetPct >= 0 ? '#D2A8FF' : '#D2A8FF';
-            html += `<span>穿越目标:</span><span style="color: ${crossTargetColor}">${crossTargetPct >= 0 ? '+' : ''}${crossTargetPct.toFixed(1)}% (${ind.emaHsCrossTarget.toFixed(1)})</span>`;
+            if (stock.close > 0) {
+              const crossTargetPct = (ind.emaHsCrossTarget / stock.close - 1) * 100;
+              html += `<span>穿越目标:</span><span style="color: #D2A8FF">${crossTargetPct >= 0 ? '+' : ''}${crossTargetPct.toFixed(1)}% (${ind.emaHsCrossTarget.toFixed(1)})</span>`;
+            } else {
+              html += `<span>穿越目标:</span><span style="color: #8B949E">数据异常</span>`;
+            }
           }
           if (ind.cri !== null && ind.cri !== undefined) html += `<span>恐慌指数:</span><span style="color: #FF6B6B">${ind.cri.toFixed(1)}</span>`;
           if (ind.greedy !== null && ind.greedy !== undefined) html += `<span>贪婪指数:</span><span style="color: #03B172">${ind.greedy.toFixed(1)}</span>`;
@@ -1066,7 +1076,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         },
       },
       axisPointer: {
-        link: [{ xAxisIndex: [0] }],
+        link: [{ xAxisIndex: [0, 1] }],
         label: { backgroundColor: '#777' },
       },
       grid: compact ? [
@@ -1184,11 +1194,10 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         },
       ],
       dataZoom: [
-        { type: 'inside', xAxisIndex: [0], start: 70, end: 100, filterMode: 'filter' },
-        { type: 'inside', xAxisIndex: [1], start: 70, end: 100, filterMode: 'filter' },
+        { type: 'inside', xAxisIndex: [0, 1], start: 70, end: 100, filterMode: 'filter' },
         {
           type: 'slider',
-          xAxisIndex: [0],
+          xAxisIndex: [0, 1],
           start: 70,
           end: 100,
           filterMode: 'filter',

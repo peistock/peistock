@@ -594,16 +594,16 @@ function calculateGreedyScore(
   const volumeSurgeScores: (number | null)[] = new Array(n).fill(null);
   const greedyState: ('greedy' | 'normal' | null)[] = new Array(n).fill(null);
   
-  if (n < 120) return { 
-    greedy, 
-    components: { 
-      posBasis: posBasisScores, 
-      upGap: upGapScores, 
-      greedVol: greedVolScores, 
-      biasExtreme: biasExtremeScores, 
-      volumeSurge: volumeSurgeScores 
-    }, 
-    greedyState 
+  if (n < 60) return {
+    greedy,
+    components: {
+      posBasis: posBasisScores,
+      upGap: upGapScores,
+      greedVol: greedVolScores,
+      biasExtreme: biasExtremeScores,
+      volumeSurge: volumeSurgeScores
+    },
+    greedyState
   };
   
   const opens = stockData.map(d => d.open);
@@ -653,8 +653,8 @@ function calculateGreedyScore(
     volMA20[i] = sum / 20;
   }
   
-  // 从第120天开始计算（需要足够的历史数据计算分位数）
-  for (let i = 120; i < n; i++) {
+  // 从第60天开始计算（需要足够的历史数据计算分位数）
+  for (let i = 60; i < n; i++) {
     const close = closes[i];
     const mahsValue = mahs[i];
     const ma20Value = ma20[i];
@@ -675,9 +675,9 @@ function calculateGreedyScore(
     // pos_basis = max(0, (price - MAHS) / MAHS * 100)
     const posBasisRaw = Math.max(0, (close - mahsValue) / mahsValue * 100);
     
-    // 获取过去120日pos_basis的历史数据
+    // 获取过去最多120日pos_basis的历史数据
     const posBasisHistory: number[] = [];
-    for (let j = i - 119; j <= i; j++) {
+    for (let j = Math.max(0, i - 119); j <= i; j++) {
       if (mahs[j] !== null) {
         posBasisHistory.push(Math.max(0, (closes[j] - mahs[j]!) / mahs[j]! * 100));
       }
@@ -731,9 +731,9 @@ function calculateGreedyScore(
     greedVolScores[i] = score3;
     
     // ===== 因子4：乖离率历史极端高位 =====
-    // 获取过去120日bias225的历史数据
+    // 获取过去最多120日bias225的历史数据
     const biasHistory: number[] = [];
-    for (let j = i - 119; j <= i; j++) {
+    for (let j = Math.max(0, i - 119); j <= i; j++) {
       if (bias225[j] !== null) {
         biasHistory.push(bias225[j]!);
       }
@@ -752,9 +752,9 @@ function calculateGreedyScore(
     // ===== 因子5：成交量激增（换手率异常）=====
     const volRatio = volume / volMA20Value;
     
-    // 获取过去120日vol_ratio的历史数据
+    // 获取过去最多120日vol_ratio的历史数据
     const volRatioHistory: number[] = [];
-    for (let j = i - 119; j <= i; j++) {
+    for (let j = Math.max(0, i - 119); j <= i; j++) {
       if (volMA20[j] !== null && volMA20[j]! > 0) {
         volRatioHistory.push(volumes[j] / volMA20[j]!);
       }
