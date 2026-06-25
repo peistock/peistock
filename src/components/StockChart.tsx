@@ -853,7 +853,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
         type: 'line',
         data: pvtData,
         smooth: true,
-        lineStyle: { width: 1.5, color: '#D2A8FF', opacity: 0.25 },
+        lineStyle: { width: 1.5, color: '#8B949E', opacity: 0.25 },
         symbol: 'none',
         yAxisIndex: 5,
       });
@@ -954,12 +954,6 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
     const crossTargetDataMin = crossTargetValues.length > 0 ? Math.min(...crossTargetValues) : -100;
     const crossTargetDataMax = crossTargetValues.length > 0 ? Math.max(...crossTargetValues) : 100;
     const crossTargetPadding = (crossTargetDataMax - crossTargetDataMin) * 0.05 || 1;
-
-    // 根据实际 K 线数据动态计算对数 y 轴范围，避免上下留白过多和 K 线穿出
-    const klineMin = Math.min(...alignedStockData.map(d => d.low));
-    const klineMax = Math.max(...alignedStockData.map(d => d.high));
-    const klineLogMin = Math.max(Math.floor(klineMin * 0.95), 0.01);
-    const klineLogMax = Math.ceil(klineMax * 1.05);
 
     const option: echarts.EChartsOption = {
       backgroundColor: 'transparent',
@@ -1103,9 +1097,7 @@ const StockChart = ({ stockData, indicators, showMAHS, showEMAHS, showMA, showVo
       ],
       yAxis: [
         {
-          type: 'log',
-          min: klineLogMin,
-          max: klineLogMax,
+          scale: true,
           splitArea: { show: false },
           axisLine: { lineStyle: { color: '#30363D' } },
           axisLabel: { color: '#8B949E' },

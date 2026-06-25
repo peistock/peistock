@@ -441,10 +441,10 @@ const HelpDialog = ({ defaultTab = 'overview', children }: HelpDialogProps) => {
                 <SectionTitle icon={BarChart3} title="K 线图说明" color="text-[#D2A8FF]" />
                 <div className="bg-[#0D1117] rounded-lg border border-[#30363D] p-4">
                   <p className="text-sm text-[#C9D1D9] mb-3">
-                    主图 K 线采用对数坐标，y 轴范围根据该股实际价格动态调整。
+                    主图 K 线采用线性坐标，y 轴会根据当前可见数据自动缩放。
                   </p>
                   <div className="space-y-2 text-xs text-[#8B949E]">
-                    <p>• 对数坐标下，相同百分比涨跌显示为相同的垂直距离，更适合观察长期趋势</p>
+                    <p>• 线性坐标下，价格等距显示，适合观察绝对价位和日常波动</p>
                     <p>• 副图显示恐慌指数、贪婪指数、成本偏离度等辅助指标</p>
                     <p>• 鼠标悬停可查看详细数据，包括穿越目标的百分比和绝对目标价</p>
                   </div>
