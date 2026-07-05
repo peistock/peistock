@@ -11,15 +11,15 @@ async function fetchJSON(path: string, options?: RequestInit) {
   const authHeaders = getAuthHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
+    ...options,
     headers: {
       ...authHeaders,
       ...(options?.headers || {}),
     },
-    ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(err.detail || err.error || `HTTP ${res.status}`);
   }
   return res.json();
 }
